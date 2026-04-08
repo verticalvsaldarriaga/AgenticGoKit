@@ -967,13 +967,9 @@ func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) 
 
 		logger().Debug().Str("baseURL", baseURL).Str("path", ssePath).Bool("hasAuth", authToken != "").Msg("[Transport] Creating http_sse client")
 
-		if authToken != "" {
-			// Use custom SSE transport with auth support
-			sseTransport := newAuthSSETransport(baseURL, ssePath, authToken)
-			return newClient(sseTransport), nil
-		}
-		// Fallback to standard transport if no auth token
-		sseTransport := transport.NewSSETransport(baseURL, ssePath)
+		// Always use the custom SSE transport — it handles SSE-formatted responses
+		// and session IDs correctly. Pass empty token when no auth is needed.
+		sseTransport := newAuthSSETransport(baseURL, ssePath, authToken)
 		return newClient(sseTransport), nil
 
 	case "http_streaming":
@@ -1003,13 +999,9 @@ func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) 
 
 		logger().Debug().Str("baseURL", baseURL).Str("path", streamPath).Bool("hasAuth", authToken != "").Msg("[Transport] Creating http_streaming client")
 
-		if authToken != "" {
-			// Use custom transport with auth support
-			streamingTransport := newAuthStreamingHTTPTransport(baseURL, streamPath, authToken)
-			return newClient(streamingTransport), nil
-		}
-		// Fallback to standard transport if no auth token
-		streamingTransport := transport.NewStreamingHTTPTransport(baseURL, streamPath)
+		// Always use the custom streaming transport — it handles SSE-formatted responses
+		// and session IDs correctly. Pass empty token when no auth is needed.
+		streamingTransport := newAuthStreamingHTTPTransport(baseURL, streamPath, authToken)
 		return newClient(streamingTransport), nil
 
 	case "websocket":
