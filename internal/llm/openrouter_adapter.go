@@ -248,6 +248,15 @@ func (o *OpenRouterAdapter) Call(ctx context.Context, prompt Prompt) (Response, 
 		attribute.String("llm.finish_reason", response.Choices[0].FinishReason),
 	)
 
+	// Capture full prompt and response at detailed trace level
+	if observability.IsDetailedTracing() {
+		span.SetAttributes(
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+			attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(response.Choices[0].Message.Content, observability.MaxContentLength)),
+		)
+	}
+
 	span.SetStatus(codes.Ok, "LLM call successful")
 
 	return Response{
@@ -393,6 +402,7 @@ func (o *OpenRouterAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan T
 
 		var chunkCount int
 		var totalBytes int64
+		var fullResponseBuilder strings.Builder
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -422,6 +432,13 @@ func (o *OpenRouterAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan T
 						attribute.Int64("llm.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed")
 					return // Stream finished successfully
 				}
@@ -449,6 +466,7 @@ func (o *OpenRouterAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan T
 					if content != "" {
 						chunkCount++
 						totalBytes += int64(len(content))
+						fullResponseBuilder.WriteString(content)
 
 						select {
 						case tokenChan <- Token{Content: content}:

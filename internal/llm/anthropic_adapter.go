@@ -375,7 +375,13 @@ func (a *AnthropicAdapter) Call(ctx context.Context, prompt Prompt) (Response, e
 		attribute.Int64("llm.latency_ms", latencyMs),
 		attribute.String("llm.finish_reason", response.StopReason),
 	)
-
+	if observability.IsDetailedTracing() {
+		span.SetAttributes(
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+			attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(contentBuilder.String(), observability.MaxContentLength)),
+		)
+	}
 	span.SetStatus(codes.Ok, "LLM call successful")
 
 	return Response{
@@ -524,6 +530,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan To
 
 		chunkCount := 0
 		totalBytes := 0
+		var fullResponseBuilder strings.Builder
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -557,6 +564,13 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan To
 						attribute.Int("llm.stream.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed successfully")
 					return
 				}
@@ -574,6 +588,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan To
 					if event.Delta != nil && event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 						chunkCount++
 						totalBytes += len(event.Delta.Text)
+						fullResponseBuilder.WriteString(event.Delta.Text)
 						select {
 						case tokenChan <- Token{Content: event.Delta.Text}:
 						case <-ctx.Done():
@@ -590,6 +605,13 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan To
 						attribute.Int("llm.stream.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed successfully")
 					return
 				case "error":

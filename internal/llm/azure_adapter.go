@@ -332,6 +332,13 @@ func (a *AzureOpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response,
 		return Response{}, err
 	}
 
+	if observability.IsDetailedTracing() {
+		span.SetAttributes(
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+			attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(llmResp.Content, observability.MaxContentLength)),
+		)
+	}
 	span.SetStatus(codes.Ok, "LLM call successful")
 	return llmResp, nil
 }
@@ -398,6 +405,7 @@ func (a *AzureOpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 		// Track chunks and total bytes
 		chunkCount := 0
 		totalBytes := 0
+		var fullResponseBuilder strings.Builder
 
 		scanner := bufio.NewScanner(httpResp.Body)
 		for scanner.Scan() {
@@ -427,6 +435,13 @@ func (a *AzureOpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 						attribute.Int("llm.stream.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed successfully")
 					return // Stream finished successfully
 				}
@@ -446,6 +461,7 @@ func (a *AzureOpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 					if contentDelta != "" {
 						chunkCount++
 						totalBytes += len(contentDelta)
+						fullResponseBuilder.WriteString(contentDelta)
 						select {
 						case tokenChan <- Token{Content: contentDelta}:
 						case <-ctx.Done():

@@ -298,6 +298,15 @@ func (o *OllamaAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 		}
 	}
 
+	// Capture full prompt and response at detailed trace level
+	if observability.IsDetailedTracing() {
+		span.SetAttributes(
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+			attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(response.Content, observability.MaxContentLength)),
+		)
+	}
+
 	span.SetStatus(codes.Ok, "LLM call successful")
 	return response, nil
 }
@@ -447,6 +456,7 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 		promptTokens := 0
 		completionTokens := 0
 		serverDurationNs := int64(0)
+		var fullResponseBuilder strings.Builder
 
 		decoder := json.NewDecoder(resp.Body)
 
@@ -478,6 +488,13 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 						attribute.Int("llm.stream.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed successfully")
 					return // End of stream
 				}
@@ -498,6 +515,7 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 			if response.Response != "" {
 				chunkCount++
 				totalBytes += len(response.Response)
+				fullResponseBuilder.WriteString(response.Response)
 				tokenChan <- Token{Content: response.Response}
 			}
 
@@ -540,6 +558,13 @@ func (o *OllamaAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 					attrs = append(attrs, attribute.Int(observability.AttrLLMTotalTokens, total))
 				}
 				span.SetAttributes(attrs...)
+				if observability.IsDetailedTracing() {
+					span.SetAttributes(
+						attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+						attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+						attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+					)
+				}
 				span.SetStatus(codes.Ok, "stream completed successfully")
 				return // Stream complete
 			}

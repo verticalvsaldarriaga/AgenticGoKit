@@ -405,7 +405,13 @@ func (h *HuggingFaceAdapter) Call(ctx context.Context, prompt Prompt) (Response,
 		attribute.Int64("llm.latency_ms", latencyMs),
 		attribute.String("llm.finish_reason", result.FinishReason),
 	)
-
+	if observability.IsDetailedTracing() {
+		span.SetAttributes(
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+			attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(result.Content, observability.MaxContentLength)),
+		)
+	}
 	span.SetStatus(codes.Ok, "LLM call successful")
 
 	return result, nil
@@ -532,6 +538,7 @@ func (h *HuggingFaceAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 
 		var chunkCount int
 		var totalBytes int64
+		var fullResponseBuilder strings.Builder
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -561,6 +568,13 @@ func (h *HuggingFaceAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 						attribute.Int64("llm.total_bytes", totalBytes),
 						attribute.Int64("llm.latency_ms", latencyMs),
 					)
+					if observability.IsDetailedTracing() {
+						span.SetAttributes(
+							attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(prompt.System, observability.MaxContentLength)),
+							attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(prompt.User, observability.MaxContentLength)),
+							attribute.String(observability.AttrLLMResponse, observability.TruncateForTrace(fullResponseBuilder.String(), observability.MaxContentLength)),
+						)
+					}
 					span.SetStatus(codes.Ok, "stream completed")
 					return // Stream finished
 				}
@@ -587,6 +601,7 @@ func (h *HuggingFaceAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan 
 				if content != "" {
 					chunkCount++
 					totalBytes += int64(len(content))
+					fullResponseBuilder.WriteString(content)
 
 					select {
 					case tokenChan <- Token{Content: content}:
