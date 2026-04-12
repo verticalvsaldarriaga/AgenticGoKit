@@ -24,6 +24,12 @@ var (
 	mu       sync.RWMutex
 )
 
+func init() {
+	// Apply INFO as the default zerolog global level so debug messages are
+	// suppressed unless explicitly overridden via SetLogLevel or AGENTICGOKIT_LOG_LEVEL.
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+}
+
 func SetLogLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()

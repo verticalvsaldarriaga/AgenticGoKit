@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agenticgokit/agenticgokit/core"
@@ -191,12 +192,20 @@ func (m *mcpToolWrapper) Execute(ctx context.Context, args map[string]interface{
 
 	// Record input size
 	inputSize := 0
+	var inputJSON []byte
 	if len(args) > 0 {
 		if jsonBytes, err := json.Marshal(args); err == nil {
+			inputJSON = jsonBytes
 			inputSize = len(jsonBytes)
 		}
 	}
 	span.SetAttributes(attribute.Int("agk.mcp.tool.input_bytes", inputSize))
+	// Capture tool arguments at detailed trace level for evaluation/debugging
+	if observability.IsDetailedTracing() && len(inputJSON) > 0 {
+		span.SetAttributes(
+			attribute.String(observability.AttrToolArguments, observability.TruncateForTrace(string(inputJSON), observability.MaxContentLength)),
+		)
+	}
 
 	// Execute through core MCP manager
 	mcpResult, err := ExecuteMCPTool(ctx, m.name, args)
@@ -212,6 +221,7 @@ func (m *mcpToolWrapper) Execute(ctx context.Context, args map[string]interface{
 	// vnext.ToolResult.Content is interface{}, so we use a flexible representation
 	var contents []map[string]interface{}
 	outputSize := 0
+	var outputTextBuilder strings.Builder
 	for _, content := range mcpResult.Content {
 		contentMap := map[string]interface{}{
 			"type": content.Type,
@@ -223,6 +233,14 @@ func (m *mcpToolWrapper) Execute(ctx context.Context, args map[string]interface{
 		// Count bytes in content
 		if jsonBytes, err := json.Marshal(contentMap); err == nil {
 			outputSize += len(jsonBytes)
+		}
+
+		// Collect text for detailed tracing
+		if content.Text != "" {
+			if outputTextBuilder.Len() > 0 {
+				outputTextBuilder.WriteString("\n")
+			}
+			outputTextBuilder.WriteString(content.Text)
 		}
 	}
 
@@ -238,6 +256,13 @@ func (m *mcpToolWrapper) Execute(ctx context.Context, args map[string]interface{
 		attribute.Bool("agk.mcp.tool.success", mcpResult.Success),
 		attribute.Int("agk.mcp.tool.content_count", len(mcpResult.Content)),
 	)
+
+	// Capture tool output at detailed trace level for evaluation/debugging
+	if observability.IsDetailedTracing() && outputTextBuilder.Len() > 0 {
+		span.SetAttributes(
+			attribute.String(observability.AttrToolResult, observability.TruncateForTrace(outputTextBuilder.String(), observability.MaxContentLength)),
+		)
+	}
 
 	if !mcpResult.Success {
 		span.SetStatus(resultStatus, "MCP tool returned success=false")
