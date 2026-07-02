@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -358,6 +359,43 @@ func NewDummyEmbeddingService(dimensions int) EmbeddingService {
 		dimensions = 1536
 	}
 	return &noOpEmbeddingService{dimensions: dimensions}
+}
+
+// NewEmbeddingServiceForConfig resolves the embedding service for a memory
+// provider configuration. Unlike the individual New*EmbeddingService helpers,
+// it fails loudly: requesting a provider whose factory has not been registered
+// returns an error instead of silently substituting the zero-vector no-op stub,
+// and an unknown provider name is an error instead of a silent dummy fallback.
+//
+// An empty provider keeps the historical dummy fallback (so zero-config memory
+// still constructs), but logs at Error level because semantic search over
+// dummy embeddings returns meaningless results.
+func NewEmbeddingServiceForConfig(cfg AgentMemoryConfig) (EmbeddingService, error) {
+	registrationHint := `register real embedding providers with: import _ "github.com/agenticgokit/agenticgokit/plugins/embedding"`
+
+	switch strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider)) {
+	case "openai", "azure":
+		if openAIEmbeddingFactory == nil {
+			return nil, fmt.Errorf("embedding provider %q requested but no OpenAI embedding factory is registered; %s", cfg.Embedding.Provider, registrationHint)
+		}
+		return openAIEmbeddingFactory(cfg.Embedding.APIKey, cfg.Embedding.Model), nil
+	case "ollama":
+		if ollamaEmbeddingFactory == nil {
+			return nil, fmt.Errorf("embedding provider \"ollama\" requested but no Ollama embedding factory is registered; %s", registrationHint)
+		}
+		return ollamaEmbeddingFactory(cfg.Embedding.Model, cfg.Embedding.BaseURL), nil
+	case "dummy":
+		return NewDummyEmbeddingService(cfg.Dimensions), nil
+	case "":
+		Logger().Error().
+			Str("memory_provider", cfg.Provider).
+			Msg("Memory is enabled but no embedding provider is configured - falling back to dummy embeddings. " +
+				"Semantic search results will be meaningless. " +
+				"Set embedding provider (\"openai\" or \"ollama\") or disable memory.")
+		return NewDummyEmbeddingService(cfg.Dimensions), nil
+	default:
+		return nil, fmt.Errorf("unsupported embedding provider %q (supported: openai, azure, ollama, dummy)", cfg.Embedding.Provider)
+	}
 }
 
 // Register embedding service factories

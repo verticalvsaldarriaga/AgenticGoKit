@@ -62,6 +62,13 @@ func TestAgentMemoryAccess(t *testing.T) {
 			RAG:      &vnext.RAGConfig{
 				// Enabled is implied by presence
 			},
+			// This test verifies memory accessor wiring, not embedding
+			// quality. Use dummy embeddings explicitly so it does not
+			// require a running Ollama instance (real embedding providers
+			// are derived from the LLM config by default).
+			Options: map[string]string{
+				"embedding_provider": "dummy",
+			},
 		},
 	}
 

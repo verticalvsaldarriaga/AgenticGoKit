@@ -181,23 +181,14 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 		// Since we can't tell if it's explicitly false or just default, we'll assume
 		// if they provided a config object, they probably want it enabled.
 		config.Memory.Enabled = true
+	}
 
-		// Smart Default: If no embedding provider is specified, try to use the LLM provider
-		if config.Memory.Options == nil {
-			config.Memory.Options = make(map[string]string)
-		}
-		if _, ok := config.Memory.Options["embedding_provider"]; !ok {
-			config.Memory.Options["embedding_provider"] = config.LLM.Provider
-			if _, ok := config.Memory.Options["embedding_model"]; !ok {
-				config.Memory.Options["embedding_model"] = config.LLM.Model
-			}
-			if _, ok := config.Memory.Options["embedding_url"]; !ok {
-				config.Memory.Options["embedding_url"] = config.LLM.BaseURL
-			}
-			if _, ok := config.Memory.Options["embedding_api_key"]; !ok {
-				config.Memory.Options["embedding_api_key"] = config.LLM.APIKey
-			}
-		}
+	// Smart Default: derive embedding configuration from the LLM provider when
+	// the user did not configure embeddings explicitly. Only providers with a
+	// real embedding backend are mapped, and a proper embedding model is used
+	// (never the chat model — see issue #137).
+	if config.Memory.Enabled {
+		applyEmbeddingDefaults(config.Memory, &config.LLM)
 	}
 
 	// Initialize memory provider

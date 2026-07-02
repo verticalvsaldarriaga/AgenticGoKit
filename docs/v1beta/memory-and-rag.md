@@ -130,6 +130,59 @@ agent, _ := v1beta.NewBuilder(cfg.Name).
 
 ---
 
+## Embeddings
+
+Semantic memory and RAG are only as good as the embeddings backing them.
+
+**Defaults (batteries included):** the v1beta builder registers the real
+embedding providers automatically and derives a sensible embedding setup from
+your LLM provider when you don't configure one:
+
+| LLM provider | Embedding provider | Default model | Dimensions |
+|---|---|---|---|
+| `ollama` | `ollama` (same BaseURL) | `nomic-embed-text` | 768 |
+| `openai` | `openai` (same API key) | `text-embedding-3-small` | 1536 |
+| anything else | none derived | — | — |
+
+For Ollama, pull the embedding model first: `ollama pull nomic-embed-text`.
+
+**Explicit configuration** via memory `Options`:
+
+```go
+Memory: &v1beta.MemoryConfig{
+    Enabled:  true,
+    Provider: "pgvector",
+    Connection: dsn,
+    Options: map[string]string{
+        "embedding_provider": "ollama",
+        "embedding_model":    "mxbai-embed-large",
+        // "dimensions" is derived automatically for known models
+        // (nomic-embed-text=768, mxbai-embed-large=1024,
+        //  text-embedding-3-small=1536, text-embedding-3-large=3072, ...);
+        // set it explicitly for models the framework doesn't know.
+    },
+},
+```
+
+**Failure modes are loud, not silent:**
+
+- Requesting `openai`/`azure`/`ollama` embeddings when no embedding factory is
+  registered returns an error at build time (v1beta registers them for you; if
+  you construct memory through `core` directly, blank-import
+  `github.com/agenticgokit/agenticgokit/plugins/embedding`).
+- An unknown `embedding_provider` returns an error listing supported values.
+- If memory is enabled with no embedding provider at all (and none can be
+  derived from your LLM provider), the framework falls back to **dummy
+  embeddings and logs at Error level**: chat history still works, but semantic
+  search results are meaningless. Configure a real embedding provider or set
+  `memory.enabled = false`.
+
+The embedding model's dimensions must match the vector store column. The
+framework derives dimensions for well-known models automatically; a mismatch
+on an existing store requires re-ingesting your data.
+
+---
+
 ## RAG basics
 
 ```go
