@@ -369,10 +369,23 @@ func NewBuilder(name string) Builder {
 	}
 }
 
-// WithConfig sets the complete configuration
+// WithConfig sets the complete configuration.
+// Fields the provided config leaves at their zero value fall back to the
+// builder's existing values (e.g. the name passed to NewBuilder and the
+// default timeout), so WithConfig(&Config{LLM: ...}) does not fail Build()
+// validation with a confusing "agent name is required" error.
 func (b *streamlinedBuilder) WithConfig(config *Config) Builder {
 	if b.built {
 		panic("Cannot modify frozen builder. Use Clone() first.")
+	}
+	if config == nil {
+		return b
+	}
+	if config.Name == "" && b.config != nil {
+		config.Name = b.config.Name
+	}
+	if config.Timeout <= 0 && b.config != nil {
+		config.Timeout = b.config.Timeout
 	}
 	b.config = config
 	return b
