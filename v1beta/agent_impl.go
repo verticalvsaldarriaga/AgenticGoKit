@@ -295,10 +295,28 @@ func (a *realAgent) execute(ctx context.Context, input string, opts *RunOptions)
 		return nil, fmt.Errorf("agent not properly initialized: LLM provider is nil")
 	}
 
-	// Step 1: Build the prompt with system context and user input
+	// Step 1: Build the prompt with system context and user input.
+	// Sampling parameters are passed per-call so configured values and
+	// RunOptions overrides actually reach the provider (the provider was
+	// constructed at Build() time; mutating config afterwards has no effect
+	// on it). RunOptions.Temperature is a pointer and survives as-is, so an
+	// explicit 0 (deterministic sampling) is honored (see #143).
+	params := llm.ModelParameters{
+		Temperature: convertFloat32ToFloat32Ptr(a.config.LLM.Temperature),
+		MaxTokens:   convertIntToInt32Ptr(a.config.LLM.MaxTokens),
+	}
+	if opts != nil && opts.Temperature != nil {
+		t := float32(*opts.Temperature)
+		params.Temperature = &t
+	}
+	if opts != nil && opts.MaxTokens > 0 {
+		m := int32(opts.MaxTokens)
+		params.MaxTokens = &m
+	}
 	prompt := llm.Prompt{
-		System: a.config.SystemPrompt,
-		User:   input,
+		System:     a.config.SystemPrompt,
+		User:       input,
+		Parameters: params,
 	}
 
 	// Capture prompt content at detailed trace level for evaluation/debugging
