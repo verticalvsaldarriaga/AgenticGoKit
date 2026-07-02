@@ -378,23 +378,51 @@ func NewEmbeddingServiceForConfig(cfg AgentMemoryConfig) (EmbeddingService, erro
 		if openAIEmbeddingFactory == nil {
 			return nil, fmt.Errorf("embedding provider %q requested but no OpenAI embedding factory is registered; %s", cfg.Embedding.Provider, registrationHint)
 		}
-		return openAIEmbeddingFactory(cfg.Embedding.APIKey, cfg.Embedding.Model), nil
+		svc := openAIEmbeddingFactory(cfg.Embedding.APIKey, cfg.Embedding.Model)
+		warnOnDimensionMismatch(cfg, svc)
+		return svc, nil
 	case "ollama":
 		if ollamaEmbeddingFactory == nil {
 			return nil, fmt.Errorf("embedding provider \"ollama\" requested but no Ollama embedding factory is registered; %s", registrationHint)
 		}
-		return ollamaEmbeddingFactory(cfg.Embedding.Model, cfg.Embedding.BaseURL), nil
+		svc := ollamaEmbeddingFactory(cfg.Embedding.Model, cfg.Embedding.BaseURL)
+		warnOnDimensionMismatch(cfg, svc)
+		return svc, nil
 	case "dummy":
 		return NewDummyEmbeddingService(cfg.Dimensions), nil
 	case "":
 		Logger().Error().
 			Str("memory_provider", cfg.Provider).
 			Msg("Memory is enabled but no embedding provider is configured - falling back to dummy embeddings. " +
-				"Semantic search results will be meaningless. " +
-				"Set embedding provider (\"openai\" or \"ollama\") or disable memory.")
+				"Chat history will still work, but semantic search and RAG will return meaningless results. " +
+				"Fix: set embedding.provider to \"openai\" or \"ollama\" " +
+				"(v1beta: Memory.Options[\"embedding_provider\"], plus embedding_model / embedding_api_key / embedding_url as needed), " +
+				"or disable memory (v1beta: Memory.Enabled=false).")
 		return NewDummyEmbeddingService(cfg.Dimensions), nil
 	default:
 		return nil, fmt.Errorf("unsupported embedding provider %q (supported: openai, azure, ollama, dummy)", cfg.Embedding.Provider)
+	}
+}
+
+// warnOnDimensionMismatch logs when the configured vector dimensions disagree
+// with what the embedding service reports. This is a warning rather than an
+// error because service-reported dimensions are heuristic for unrecognized
+// models, but a real mismatch makes vector-store writes fail (or silently
+// corrupts similarity search), so it should be visible before the first write.
+func warnOnDimensionMismatch(cfg AgentMemoryConfig, svc EmbeddingService) {
+	if cfg.Dimensions <= 0 || svc == nil {
+		return
+	}
+	if got := svc.GetDimensions(); got > 0 && got != cfg.Dimensions {
+		Logger().Warn().
+			Str("embedding_provider", cfg.Embedding.Provider).
+			Str("embedding_model", cfg.Embedding.Model).
+			Int("configured_dimensions", cfg.Dimensions).
+			Int("model_dimensions", got).
+			Msg("Configured memory dimensions do not match the embedding model's dimensions - " +
+				"vector-store writes may fail or similarity search may degrade. " +
+				"Set dimensions to match the embedding model (v1beta: Memory.Options[\"dimensions\"]), " +
+				"and re-ingest existing data if the store was created with different dimensions.")
 	}
 }
 

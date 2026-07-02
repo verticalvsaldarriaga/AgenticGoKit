@@ -179,9 +179,22 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 	// be force-enabled, which made it impossible to disable memory through
 	// Config — see issue #137, additional finding B.)
 	if !config.Memory.Enabled {
-		Logger().Info().
-			Str("agent", config.Name).
-			Msg("Memory is disabled (Memory.Enabled=false). Set Enabled: true in MemoryConfig to enable it.")
+		// A config that sets provider/connection/RAG/options but leaves
+		// Enabled at its zero value almost always means the user forgot
+		// Enabled: true (it used to be implied), so warn loudly; a bare
+		// {Enabled: false} is a deliberate disable and only worth an Info.
+		if config.Memory.Provider != "" || config.Memory.Connection != "" ||
+			config.Memory.RAG != nil || len(config.Memory.Options) > 0 {
+			Logger().Warn().
+				Str("agent", config.Name).
+				Str("memory_provider", config.Memory.Provider).
+				Msg("MemoryConfig has settings but Enabled is false - memory is DISABLED. " +
+					"If you meant to enable it, set Enabled: true in MemoryConfig (it is no longer implied by presence).")
+		} else {
+			Logger().Info().
+				Str("agent", config.Name).
+				Msg("Memory is disabled (Memory.Enabled=false).")
+		}
 	}
 
 	// Smart Default: derive embedding configuration from the LLM provider when
