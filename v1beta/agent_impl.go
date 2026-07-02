@@ -90,6 +90,37 @@ type realAgent struct {
 	tracerShutdown func(context.Context) error
 	runID          string
 	runDir         string
+
+	// Non-fatal findings collected during construction; exposed via
+	// Diagnostics() / DiagnosticsOf and dispatched to the builder's
+	// DiagnosticHandler.
+	diagnostics []Diagnostic
+}
+
+// Diagnostics returns the non-fatal findings collected while building this
+// agent (see DiagnosticsOf).
+func (a *realAgent) Diagnostics() []Diagnostic {
+	return a.diagnostics
+}
+
+// addDiagnostic records a diagnostic and logs it at the matching level, so
+// the finding is visible both programmatically and in logs.
+func (a *realAgent) addDiagnostic(d Diagnostic) {
+	a.diagnostics = append(a.diagnostics, d)
+
+	evt := Logger().Info()
+	switch d.Severity {
+	case DiagWarning:
+		evt = Logger().Warn()
+	case DiagError:
+		evt = Logger().Error()
+	}
+	evt.Str("agent", a.config.Name).
+		Str("diagnostic_code", string(d.Code))
+	for k, v := range d.Details {
+		evt.Str(k, v)
+	}
+	evt.Msg(d.Message)
 }
 
 // sessionState tracks per-session information for the agent
@@ -185,11 +216,13 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 		// {Enabled: false} is a deliberate disable and only worth an Info.
 		if config.Memory.Provider != "" || config.Memory.Connection != "" ||
 			config.Memory.RAG != nil || len(config.Memory.Options) > 0 {
-			Logger().Warn().
-				Str("agent", config.Name).
-				Str("memory_provider", config.Memory.Provider).
-				Msg("MemoryConfig has settings but Enabled is false - memory is DISABLED. " +
-					"If you meant to enable it, set Enabled: true in MemoryConfig (it is no longer implied by presence).")
+			agent.addDiagnostic(Diagnostic{
+				Severity: DiagWarning,
+				Code:     DiagMemoryDisabledWithConfig,
+				Message: "MemoryConfig has settings but Enabled is false - memory is DISABLED. " +
+					"If you meant to enable it, set Enabled: true in MemoryConfig (it is no longer implied by presence).",
+				Details: map[string]string{"memory_provider": config.Memory.Provider},
+			})
 		} else {
 			Logger().Info().
 				Str("agent", config.Name).
@@ -203,6 +236,43 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 	// (never the chat model — see issue #137).
 	if config.Memory.Enabled {
 		applyEmbeddingDefaults(config.Memory, &config.LLM)
+
+		// Surface degraded or risky embedding configurations as
+		// diagnostics the consumer can act on programmatically.
+		embeddingProvider := config.Memory.Options["embedding_provider"]
+		embeddingModel := config.Memory.Options["embedding_model"]
+		switch embeddingProvider {
+		case "":
+			agent.addDiagnostic(Diagnostic{
+				Severity: DiagError,
+				Code:     DiagEmbeddingFallbackDummy,
+				Message: "Memory is enabled but no embedding backend is configured or derivable from LLM provider \"" + config.LLM.Provider + "\" - " +
+					"falling back to dummy embeddings. Chat history will work; semantic search and RAG will return meaningless results. " +
+					"Fix: set Memory.Options[\"embedding_provider\"] to \"openai\" or \"ollama\" (with embedding_model / embedding_api_key / embedding_url as needed), " +
+					"or disable memory with Memory.Enabled=false.",
+				Details: map[string]string{
+					"llm_provider":   config.LLM.Provider,
+					"fix_option_key": "embedding_provider",
+				},
+			})
+		default:
+			if dims := config.Memory.Options["dimensions"]; dims != "" && embeddingModel != "" {
+				if known := dimensionsForEmbeddingModel(embeddingModel); known > 0 && dims != fmt.Sprintf("%d", known) {
+					agent.addDiagnostic(Diagnostic{
+						Severity: DiagWarning,
+						Code:     DiagEmbeddingDimensionMismatch,
+						Message: "Configured memory dimensions (" + dims + ") do not match embedding model \"" + embeddingModel + "\" (" + fmt.Sprintf("%d", known) + ") - " +
+							"vector-store writes may fail or similarity search may degrade. " +
+							"Set Memory.Options[\"dimensions\"] to match the model, and re-ingest data stored with different dimensions.",
+						Details: map[string]string{
+							"embedding_model":       embeddingModel,
+							"configured_dimensions": dims,
+							"model_dimensions":      fmt.Sprintf("%d", known),
+						},
+					})
+				}
+			}
+		}
 	}
 
 	// Initialize memory provider

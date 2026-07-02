@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -361,6 +362,23 @@ func NewDummyEmbeddingService(dimensions int) EmbeddingService {
 	return &noOpEmbeddingService{dimensions: dimensions}
 }
 
+// Sentinel errors for embedding configuration failures. They are wrapped
+// into the errors returned by NewEmbeddingServiceForConfig (and therefore
+// into memory/agent construction errors), so consumers can branch with
+// errors.Is instead of string-matching messages:
+//
+//	if errors.Is(err, core.ErrEmbeddingFactoryNotRegistered) { ... }
+var (
+	// ErrEmbeddingFactoryNotRegistered: a real embedding provider was
+	// requested but its factory was never registered (missing
+	// plugins/embedding import in the consumer binary).
+	ErrEmbeddingFactoryNotRegistered = errors.New("embedding factory not registered")
+
+	// ErrEmbeddingProviderUnsupported: the configured embedding provider
+	// name is not one of the supported values.
+	ErrEmbeddingProviderUnsupported = errors.New("unsupported embedding provider")
+)
+
 // NewEmbeddingServiceForConfig resolves the embedding service for a memory
 // provider configuration. Unlike the individual New*EmbeddingService helpers,
 // it fails loudly: requesting a provider whose factory has not been registered
@@ -376,14 +394,14 @@ func NewEmbeddingServiceForConfig(cfg AgentMemoryConfig) (EmbeddingService, erro
 	switch strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider)) {
 	case "openai", "azure":
 		if openAIEmbeddingFactory == nil {
-			return nil, fmt.Errorf("embedding provider %q requested but no OpenAI embedding factory is registered; %s", cfg.Embedding.Provider, registrationHint)
+			return nil, fmt.Errorf("%w: embedding provider %q requested but no OpenAI embedding factory is registered; %s", ErrEmbeddingFactoryNotRegistered, cfg.Embedding.Provider, registrationHint)
 		}
 		svc := openAIEmbeddingFactory(cfg.Embedding.APIKey, cfg.Embedding.Model)
 		warnOnDimensionMismatch(cfg, svc)
 		return svc, nil
 	case "ollama":
 		if ollamaEmbeddingFactory == nil {
-			return nil, fmt.Errorf("embedding provider \"ollama\" requested but no Ollama embedding factory is registered; %s", registrationHint)
+			return nil, fmt.Errorf("%w: embedding provider \"ollama\" requested but no Ollama embedding factory is registered; %s", ErrEmbeddingFactoryNotRegistered, registrationHint)
 		}
 		svc := ollamaEmbeddingFactory(cfg.Embedding.Model, cfg.Embedding.BaseURL)
 		warnOnDimensionMismatch(cfg, svc)
@@ -400,7 +418,7 @@ func NewEmbeddingServiceForConfig(cfg AgentMemoryConfig) (EmbeddingService, erro
 				"or disable memory (v1beta: Memory.Enabled=false).")
 		return NewDummyEmbeddingService(cfg.Dimensions), nil
 	default:
-		return nil, fmt.Errorf("unsupported embedding provider %q (supported: openai, azure, ollama, dummy)", cfg.Embedding.Provider)
+		return nil, fmt.Errorf("%w: %q (supported: openai, azure, ollama, dummy)", ErrEmbeddingProviderUnsupported, cfg.Embedding.Provider)
 	}
 }
 

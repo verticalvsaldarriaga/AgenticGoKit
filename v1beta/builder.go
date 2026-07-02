@@ -30,6 +30,11 @@ type Builder interface {
 	// Observability
 	WithObservability(serviceName, serviceVersion string) Builder
 
+	// WithDiagnosticHandler registers a callback that receives non-fatal
+	// build-time findings (degraded embeddings, suspicious configs, ...)
+	// as values instead of only log lines. See also DiagnosticsOf.
+	WithDiagnosticHandler(handler DiagnosticHandler) Builder
+
 	// Convenience methods (5 methods)
 	WithMemory(opts ...MemoryOption) Builder
 	WithTools(opts ...ToolOption) Builder
@@ -349,6 +354,20 @@ type streamlinedBuilder struct {
 	observabilityEnabled bool
 	serviceName          string
 	serviceVersion       string
+
+	// Diagnostics
+	diagnosticHandler DiagnosticHandler
+}
+
+// WithDiagnosticHandler registers a callback invoked once per non-fatal
+// build-time finding after the agent is constructed. Diagnostics are also
+// always logged and remain readable via DiagnosticsOf(agent).
+func (b *streamlinedBuilder) WithDiagnosticHandler(handler DiagnosticHandler) Builder {
+	if b.built {
+		panic("Cannot modify frozen builder. Use Clone() first.")
+	}
+	b.diagnosticHandler = handler
+	return b
 }
 
 // NewBuilder creates a new streamlined agent builder
@@ -560,6 +579,13 @@ func (b *streamlinedBuilder) Build() (Agent, error) {
 		fmt.Printf("⚠️  Warning: Failed to setup observability: %v\n", err)
 	}
 
+	// Hand build-time diagnostics to the consumer's handler, if registered.
+	if b.diagnosticHandler != nil {
+		for _, d := range DiagnosticsOf(agent) {
+			b.diagnosticHandler(d)
+		}
+	}
+
 	return agent, nil
 }
 
@@ -720,6 +746,7 @@ func (b *streamlinedBuilder) Clone() Builder {
 		observabilityEnabled: b.observabilityEnabled,
 		serviceName:          b.serviceName,
 		serviceVersion:       b.serviceVersion,
+		diagnosticHandler:    b.diagnosticHandler,
 	}
 }
 

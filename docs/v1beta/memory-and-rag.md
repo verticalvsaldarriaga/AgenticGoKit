@@ -165,7 +165,34 @@ Memory: &v1beta.MemoryConfig{
 },
 ```
 
-**Failure modes are loud, not silent:**
+**Failure modes are consumable, not just loud:**
+
+Non-fatal findings (dummy-embedding fallback, dimension mismatch, memory
+disabled with settings) are surfaced as **values**, not only log lines:
+
+```go
+agent, err := v1beta.NewBuilder("bot").
+    WithConfig(cfg).
+    WithDiagnosticHandler(func(d v1beta.Diagnostic) {
+        if d.Code == v1beta.DiagEmbeddingFallbackDummy {
+            log.Fatalf("refusing to deploy with dummy embeddings: %s", d.Message)
+        }
+    }).
+    Build()
+
+// or inspect after the fact:
+for _, d := range v1beta.DiagnosticsOf(agent) { ... }
+```
+
+Fatal embedding configuration errors wrap typed sentinels, so you can branch
+without string-matching:
+
+```go
+if errors.Is(err, core.ErrEmbeddingFactoryNotRegistered) { ... }
+if errors.Is(err, core.ErrEmbeddingProviderUnsupported)  { ... }
+```
+
+**Failure modes:**
 
 - Requesting `openai`/`azure`/`ollama` embeddings when no embedding factory is
   registered returns an error at build time (v1beta registers them for you; if

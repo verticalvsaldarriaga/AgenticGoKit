@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,9 @@ func TestNewEmbeddingServiceForConfig_UnregisteredFactoryFailsLoudly(t *testing.
 		if !strings.Contains(err.Error(), "plugins/embedding") {
 			t.Errorf("provider %q: error should point at the plugins/embedding import, got: %v", provider, err)
 		}
+		if !errors.Is(err, ErrEmbeddingFactoryNotRegistered) {
+			t.Errorf("provider %q: error should wrap ErrEmbeddingFactoryNotRegistered for programmatic handling, got: %v", provider, err)
+		}
 	}
 }
 
@@ -74,8 +78,12 @@ func TestNewEmbeddingServiceForConfig_UnknownProviderIsError(t *testing.T) {
 		Provider:  "chromem",
 		Embedding: EmbeddingConfig{Provider: "anthropic"},
 	}
-	if _, err := NewEmbeddingServiceForConfig(cfg); err == nil {
-		t.Error("expected error for unknown embedding provider, got nil")
+	_, err := NewEmbeddingServiceForConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown embedding provider, got nil")
+	}
+	if !errors.Is(err, ErrEmbeddingProviderUnsupported) {
+		t.Errorf("error should wrap ErrEmbeddingProviderUnsupported for programmatic handling, got: %v", err)
 	}
 }
 
