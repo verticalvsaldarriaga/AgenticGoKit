@@ -16,7 +16,8 @@ Add conversational memory and Retrieval-Augmented Generation (RAG) to v1beta age
 ## Defaults and options
 
 - Default: chromem is enabled when no memory config is provided. Imports register providers; no extra code needed.
-- Disable memory: set `memory.enabled = false` in TOML or skip `WithMemory` and provide a `Config` with memory disabled.
+- Disable memory: set `memory.enabled = false` in TOML, or `Memory: &MemoryConfig{Enabled: false}` in code.
+- When you provide a `MemoryConfig` yourself, set `Enabled: true` explicitly — the flag is honored as written (a zero-value `Enabled` means disabled).
 - MemoryOption helpers:
   - `WithMemoryProvider(provider string)` – "chromem" (embedded) or "pgvector" (PostgreSQL + pgvector).
   - `WithRAG(maxTokens int, personalWeight, knowledgeWeight float32)` – sets weights and a 10-message history window.

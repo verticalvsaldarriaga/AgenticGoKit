@@ -1289,6 +1289,7 @@ Complete configuration example:
 				MaxTokens:   4096,
 			},
 			Memory: &MemoryConfig{
+				Enabled:  true,
 				Provider: "memory",
 				RAG: &RAGConfig{
 					MaxTokens:       2048,

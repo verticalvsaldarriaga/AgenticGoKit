@@ -173,14 +173,15 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 				KnowledgeWeight: 0.7,
 			},
 		}
-	} else {
-		// If MemoryConfig is provided, ensure it's Enabled by default unless explicitly false
-		// Actually, we should probably just treat a non-nil MemoryConfig as wanting memory.
-		// But follow the Enabled flag if it's there.
-		// Simple fix: if a config is there, we default Enabled to true if not specified.
-		// Since we can't tell if it's explicitly false or just default, we'll assume
-		// if they provided a config object, they probably want it enabled.
-		config.Memory.Enabled = true
+	}
+	// When a MemoryConfig is provided, its Enabled flag is honored as
+	// documented: Enabled=false disables memory. (A provided config used to
+	// be force-enabled, which made it impossible to disable memory through
+	// Config — see issue #137, additional finding B.)
+	if !config.Memory.Enabled {
+		Logger().Info().
+			Str("agent", config.Name).
+			Msg("Memory is disabled (Memory.Enabled=false). Set Enabled: true in MemoryConfig to enable it.")
 	}
 
 	// Smart Default: derive embedding configuration from the LLM provider when
