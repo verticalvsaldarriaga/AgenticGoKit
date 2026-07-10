@@ -21,6 +21,21 @@ import (
 // DefaultOpenAIBaseURL is the default OpenAI API endpoint
 const DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 
+// APIStatusError is returned when the OpenAI-compatible endpoint responds
+// with a non-200 status. StatusCode is preserved (previously discarded —
+// the error was a flat string built from the response body, giving callers
+// no structured way to classify e.g. a 502/503/524 gateway blip as
+// retry-worthy vs. a genuine 4xx client error) so downstream code can use
+// errors.As instead of matching substrings against the error text.
+type APIStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIStatusError) Error() string {
+	return fmt.Sprintf("OpenAI API error (status %d): %s", e.StatusCode, e.Body)
+}
+
 // OpenAIAdapterConfig holds extended configuration for OpenAI-compatible adapters
 type OpenAIAdapterConfig struct {
 	APIKey       string
@@ -292,7 +307,7 @@ func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		err := errors.New("OpenAI API error: " + string(body))
+		err := &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, fmt.Sprintf("API error: status %d", resp.StatusCode))
 		return Response{}, err

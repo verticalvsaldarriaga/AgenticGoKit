@@ -22,6 +22,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// APIStatusError is a re-export of internal/llm.APIStatusError — external
+// callers (Go's "internal" import rule blocks reaching internal/llm
+// directly from outside this module, even via a go.mod replace) can use
+// errors.As(err, &v1beta.APIStatusError{}) against a Run()/execute() error
+// to classify a non-200 LLM-endpoint response by its actual StatusCode
+// instead of matching substrings against the error text.
+type APIStatusError = llm.APIStatusError
+
 // addMultimodalDataToPrompt adds multimodal data from RunOptions to an llm.Prompt.
 // This is a helper to avoid code duplication between execute and streaming methods.
 func addMultimodalDataToPrompt(prompt *llm.Prompt, opts *RunOptions) {
