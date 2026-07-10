@@ -135,6 +135,22 @@ func (o *OpenAIAdapter) SetExtraHeaders(headers map[string]string) {
 	o.extraHeaders = headers
 }
 
+// setSessionHeader forwards a per-call session identifier as an outbound
+// X-Session-Id header, when the caller supplied one via
+// RunOptions.SessionID (agent_impl.go already threads this into ctx as
+// context.WithValue(ctx, "session_id", ...), but nothing previously read it
+// back out — every call looked session-less to the provider regardless of
+// what the caller passed). Several OpenAI-compatible gateways (session-aware
+// routers/caching proxies) use this header for sticky routing and cache
+// affinity; a static extraHeaders map (set once at adapter construction,
+// shared by every call for the adapter's lifetime) can't carry a value that
+// varies per call, so this reads it from ctx instead, per call.
+func setSessionHeader(req *http.Request, ctx context.Context) {
+	if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
+		req.Header.Set("X-Session-Id", sid)
+	}
+}
+
 // setHeaders sets common headers for requests
 func (o *OpenAIAdapter) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
@@ -261,6 +277,7 @@ func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 		return Response{}, err
 	}
 	o.setHeaders(req)
+	setSessionHeader(req, ctx)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -451,6 +468,7 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	o.setHeaders(req)
+	setSessionHeader(req, ctx)
 
 	// Make the request
 	resp, err := o.httpClient.Do(req)
@@ -600,6 +618,7 @@ func (o *OpenAIAdapter) Embeddings(ctx context.Context, texts []string) ([][]flo
 		return nil, err
 	}
 	o.setHeaders(req)
+	setSessionHeader(req, ctx)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
