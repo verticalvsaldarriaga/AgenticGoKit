@@ -181,14 +181,22 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 				KnowledgeWeight: 0.7,
 			},
 		}
-	} else {
-		// If MemoryConfig is provided, ensure it's Enabled by default unless explicitly false
-		// Actually, we should probably just treat a non-nil MemoryConfig as wanting memory.
-		// But follow the Enabled flag if it's there.
-		// Simple fix: if a config is there, we default Enabled to true if not specified.
-		// Since we can't tell if it's explicitly false or just default, we'll assume
-		// if they provided a config object, they probably want it enabled.
-		config.Memory.Enabled = true
+	} else if config.Memory.Enabled {
+		// Fixed 2026-07-10: this branch used to unconditionally force
+		// config.Memory.Enabled = true regardless of what the caller set,
+		// with a comment admitting it couldn't tell "explicitly false" from
+		// "unset" and just assumed true either way — meaning
+		// &MemoryConfig{Enabled: false} (the ONLY way to opt out of the
+		// nil-defaults-to-chromem behavior above) was silently overridden
+		// back to enabled. Confirmed live: cubejs-agentic-chat's Planning/
+		// Router/Consolidation agents all explicitly disable memory (they
+		// have their own memory-retrieval path and don't want this
+		// framework's automatic chromem-backed enrichment+auto-store), and
+		// every .Info() log line proved it was running anyway. A caller
+		// that provides a non-nil *MemoryConfig is explicit about intent by
+		// definition — trust config.Memory.Enabled as given; only fill in
+		// the embedding-provider smart-defaults below when they actually
+		// asked for memory.
 
 		// Smart Default: If no embedding provider is specified, try to use the LLM provider
 		if config.Memory.Options == nil {
