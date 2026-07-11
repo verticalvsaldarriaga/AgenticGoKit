@@ -213,9 +213,20 @@ func (h *authStreamingHTTPTransport) Send(message *mcp.Message) error {
 		return nil
 	}
 
-	// Check if response is in SSE format (starts with "event:" or "data:")
+	// Check if response is in SSE format. Not just a prefix check: a
+	// streamable-HTTP connection can emit a leading keep-alive comment line
+	// (e.g. ": ping\n\n") before the real "event: message\ndata: {...}"
+	// frame — io.ReadAll captures both concatenated, so the real frame is
+	// no longer at byte 0. A strict HasPrefix("event:") here falls through
+	// to the plain-JSON branch below, which chokes on the leading ':' with
+	// "invalid character ':' looking for beginning of value". Checking
+	// Content-Type and/or scanning for the markers anywhere in the body
+	// (not just at the start) survives a leading comment line.
 	bodyStr := string(body)
-	if strings.HasPrefix(bodyStr, "event:") || strings.HasPrefix(bodyStr, "data:") {
+	looksLikeSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") ||
+		strings.HasPrefix(bodyStr, "event:") || strings.HasPrefix(bodyStr, "data:") ||
+		strings.Contains(bodyStr, "\nevent:") || strings.Contains(bodyStr, "\ndata:")
+	if looksLikeSSE {
 		logger().Debug().Msg("[Streaming] Response is in SSE format, parsing...")
 
 		// Parse SSE format to extract JSON data
