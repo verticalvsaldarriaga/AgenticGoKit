@@ -40,6 +40,13 @@ type ProviderConfig struct {
 	// JSON content with no markdown fencing.
 	ResponseFormat interface{} `json:"response_format,omitempty" toml:"response_format,omitempty"`
 
+	// CachePrompt, when true, sets the OpenAI-compatible adapter's
+	// "cache_prompt" request field — llama.cpp's server flag to reuse a
+	// matching KV-cache prefix instead of re-prefilling it. Not yet verified
+	// live (no reachable llama.cpp endpoint at the time this was added —
+	// see cubejs-agentic-chat's ADR on this).
+	CachePrompt bool `json:"cache_prompt,omitempty" toml:"cache_prompt,omitempty"`
+
 	// Azure-specific fields
 	Endpoint            string `json:"endpoint,omitempty" toml:"endpoint,omitempty"`
 	ChatDeployment      string `json:"chat_deployment,omitempty" toml:"chat_deployment,omitempty"`
@@ -189,6 +196,7 @@ func (f *ProviderFactory) createOpenAIProvider(config ProviderConfig) (ModelProv
 		BaseURL:        config.BaseURL,
 		HTTPTimeout:    config.HTTPTimeout,
 		ResponseFormat: config.ResponseFormat,
+		CachePrompt:    config.CachePrompt,
 	}
 
 	return NewOpenAIAdapterWithConfig(adapterConfig)

@@ -69,6 +69,61 @@ func TestOpenAIAdapter_Call_ResponseFormat(t *testing.T) {
 	})
 }
 
+// TestOpenAIAdapter_Call_CachePrompt is hermetic (httptest, no live API key
+// needed) — asserts the "cache_prompt" field's presence/absence in the
+// actual outbound request body.
+func TestOpenAIAdapter_Call_CachePrompt(t *testing.T) {
+	t.Run("set when configured", func(t *testing.T) {
+		var gotBody map[string]interface{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+		}))
+		defer server.Close()
+
+		adapter, err := NewOpenAIAdapterWithConfig(OpenAIAdapterConfig{
+			APIKey:      "test-key",
+			Model:       "test-model",
+			BaseURL:     server.URL,
+			CachePrompt: true,
+		})
+		require.NoError(t, err)
+
+		_, err = adapter.Call(context.Background(), Prompt{User: "hello"})
+		require.NoError(t, err)
+
+		cp, ok := gotBody["cache_prompt"].(bool)
+		require.True(t, ok, "cache_prompt missing from request body: %v", gotBody)
+		assert.True(t, cp)
+	})
+
+	t.Run("absent when not configured", func(t *testing.T) {
+		var gotBody map[string]interface{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+		}))
+		defer server.Close()
+
+		adapter, err := NewOpenAIAdapterWithConfig(OpenAIAdapterConfig{
+			APIKey:  "test-key",
+			Model:   "test-model",
+			BaseURL: server.URL,
+		})
+		require.NoError(t, err)
+
+		_, err = adapter.Call(context.Background(), Prompt{User: "hello"})
+		require.NoError(t, err)
+
+		_, ok := gotBody["cache_prompt"]
+		assert.False(t, ok, "cache_prompt should be absent when not configured, got: %v", gotBody)
+	})
+}
+
 func TestOpenAIAdapter_Call(t *testing.T) {
 	t.Run("Valid prompt", func(t *testing.T) {
 		apiKey := os.Getenv("OPENAI_API_KEY")

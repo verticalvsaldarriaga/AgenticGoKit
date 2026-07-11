@@ -60,6 +60,14 @@ type LLMConfig struct {
 	// value) omits the field entirely — no behavior change for existing
 	// callers. Use JSONObjectResponseFormat() for the common case.
 	ResponseFormat interface{} `toml:"response_format,omitempty"`
+
+	// CachePrompt, when true, sets the OpenAI-compatible adapter's
+	// "cache_prompt" request field — llama.cpp's server flag to reuse a
+	// matching KV-cache prefix instead of re-prefilling it. false (the zero
+	// value) omits the field entirely — no-op on non-llama.cpp backends.
+	// Not yet verified live (no reachable llama.cpp endpoint when this was
+	// added).
+	CachePrompt bool `toml:"cache_prompt,omitempty"`
 }
 
 // JSONObjectResponseFormat returns the OpenAI-compatible "loose JSON"

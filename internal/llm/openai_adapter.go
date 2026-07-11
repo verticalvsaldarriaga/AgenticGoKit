@@ -60,6 +60,12 @@ type OpenAIAdapterConfig struct {
 	// value) omits the field entirely — no behavior change for existing
 	// callers.
 	ResponseFormat interface{}
+
+	// CachePrompt, when true, sets the request body's "cache_prompt" field —
+	// llama.cpp's server flag to reuse a matching KV-cache prefix instead of
+	// re-prefilling it. false (the zero value) omits the field entirely, so
+	// non-llama.cpp OpenAI-compatible backends never see it.
+	CachePrompt bool
 }
 
 // OpenAIAdapter implements the ModelProvider interface for OpenAI-compatible APIs.
@@ -83,6 +89,7 @@ type OpenAIAdapter struct {
 	stop              []string
 
 	responseFormat interface{}
+	cachePrompt    bool
 }
 
 // NewOpenAIAdapter creates a new OpenAIAdapter instance.
@@ -145,6 +152,7 @@ func NewOpenAIAdapterWithConfig(config OpenAIAdapterConfig) (*OpenAIAdapter, err
 		repetitionPenalty: config.RepetitionPenalty,
 		stop:              config.Stop,
 		responseFormat:    config.ResponseFormat,
+		cachePrompt:       config.CachePrompt,
 	}, nil
 }
 
@@ -289,6 +297,9 @@ func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 	}
 	if o.responseFormat != nil {
 		reqBody["response_format"] = o.responseFormat
+	}
+	if o.cachePrompt {
+		reqBody["cache_prompt"] = true
 	}
 
 	requestBody, err := json.Marshal(reqBody)
