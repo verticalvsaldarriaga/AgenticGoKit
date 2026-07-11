@@ -40,6 +40,7 @@ func createLLMProvider(config LLMConfig) (llm.ModelProvider, error) {
 		ChatDeployment:      config.ChatDeployment,      // For Azure
 		EmbeddingDeployment: config.EmbeddingDeployment, // For Azure
 		APIVersion:          config.APIVersion,          // For Azure
+		ResponseFormat:      config.ResponseFormat,
 	}
 
 	if llmConfig.Type == llm.ProviderTypeAzureOpenAI && llmConfig.Endpoint == "" && llmConfig.BaseURL != "" {

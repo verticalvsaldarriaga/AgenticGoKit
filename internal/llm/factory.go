@@ -34,6 +34,12 @@ type ProviderConfig struct {
 	MaxTokens   int          `json:"max_tokens,omitempty" toml:"max_tokens,omitempty"`
 	Temperature float32      `json:"temperature,omitempty" toml:"temperature,omitempty"`
 
+	// ResponseFormat, when non-nil, is passed through to the OpenAI-compatible
+	// adapter's "response_format" request field (e.g. {"type":"json_object"}).
+	// Verified live 2026-07-10 against Cerebras/gpt-oss-120b: honored, clean
+	// JSON content with no markdown fencing.
+	ResponseFormat interface{} `json:"response_format,omitempty" toml:"response_format,omitempty"`
+
 	// Azure-specific fields
 	Endpoint            string `json:"endpoint,omitempty" toml:"endpoint,omitempty"`
 	ChatDeployment      string `json:"chat_deployment,omitempty" toml:"chat_deployment,omitempty"`
@@ -176,12 +182,13 @@ func (f *ProviderFactory) createOpenAIProvider(config ProviderConfig) (ModelProv
 
 	// Use NewOpenAIAdapterWithConfig to support BaseURL and other options
 	adapterConfig := OpenAIAdapterConfig{
-		APIKey:      config.APIKey,
-		Model:       config.Model,
-		MaxTokens:   config.MaxTokens,
-		Temperature: config.Temperature,
-		BaseURL:     config.BaseURL,
-		HTTPTimeout: config.HTTPTimeout,
+		APIKey:         config.APIKey,
+		Model:          config.Model,
+		MaxTokens:      config.MaxTokens,
+		Temperature:    config.Temperature,
+		BaseURL:        config.BaseURL,
+		HTTPTimeout:    config.HTTPTimeout,
+		ResponseFormat: config.ResponseFormat,
 	}
 
 	return NewOpenAIAdapterWithConfig(adapterConfig)

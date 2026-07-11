@@ -55,6 +55,21 @@ type LLMConfig struct {
 	Modalities  []string `toml:"modalities,omitempty"`   // Supported modalities (text, image, audio, video)
 	OutputTypes []string `toml:"output_types,omitempty"` // Desired output types
 
+	// ResponseFormat, when non-nil, is passed through verbatim as the
+	// OpenAI-compatible "response_format" request field. nil (the zero
+	// value) omits the field entirely — no behavior change for existing
+	// callers. Use JSONObjectResponseFormat() for the common case.
+	ResponseFormat interface{} `toml:"response_format,omitempty"`
+}
+
+// JSONObjectResponseFormat returns the OpenAI-compatible "loose JSON"
+// response_format value — the model must return valid JSON, no schema
+// required. Broadly supported across OpenAI-compatible providers;
+// verified live 2026-07-10 against Cerebras/gpt-oss-120b (honored, clean
+// JSON content, no markdown fencing). Prefer this over hand-rolling the
+// map literal at call sites.
+func JSONObjectResponseFormat() interface{} {
+	return map[string]interface{}{"type": "json_object"}
 }
 
 // MemoryConfig contains memory and RAG configuration

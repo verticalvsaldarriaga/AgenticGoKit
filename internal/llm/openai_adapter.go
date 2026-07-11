@@ -53,6 +53,13 @@ type OpenAIAdapterConfig struct {
 	FrequencyPenalty  float32
 	RepetitionPenalty float32
 	Stop              []string
+
+	// ResponseFormat, when non-nil, is passed through verbatim as the
+	// OpenAI-compatible "response_format" request field (e.g.
+	// map[string]interface{}{"type": "json_object"}). nil (the zero
+	// value) omits the field entirely — no behavior change for existing
+	// callers.
+	ResponseFormat interface{}
 }
 
 // OpenAIAdapter implements the ModelProvider interface for OpenAI-compatible APIs.
@@ -74,6 +81,8 @@ type OpenAIAdapter struct {
 	frequencyPenalty  float32
 	repetitionPenalty float32
 	stop              []string
+
+	responseFormat interface{}
 }
 
 // NewOpenAIAdapter creates a new OpenAIAdapter instance.
@@ -135,6 +144,7 @@ func NewOpenAIAdapterWithConfig(config OpenAIAdapterConfig) (*OpenAIAdapter, err
 		frequencyPenalty:  config.FrequencyPenalty,
 		repetitionPenalty: config.RepetitionPenalty,
 		stop:              config.Stop,
+		responseFormat:    config.ResponseFormat,
 	}, nil
 }
 
@@ -276,6 +286,9 @@ func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 	}
 	if len(o.stop) > 0 {
 		reqBody["stop"] = o.stop
+	}
+	if o.responseFormat != nil {
+		reqBody["response_format"] = o.responseFormat
 	}
 
 	requestBody, err := json.Marshal(reqBody)
