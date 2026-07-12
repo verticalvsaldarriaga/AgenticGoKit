@@ -132,8 +132,17 @@ func (h *authStreamingHTTPTransport) Close() error {
 }
 
 func (h *authStreamingHTTPTransport) Send(message *mcp.Message) error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	// Full write lock, not RLock: this mutates h.lastResponse and
+	// h.sessionID. Confirmed live 2026-07-11: this Go server is
+	// single-process, multi-session, and a single transport instance is
+	// shared across concurrent turns — RLock let two goroutines run
+	// Send/Receive concurrently and stomp on the shared lastResponse slot
+	// between each other's own Send/Receive pair (one call's stored
+	// response silently cleared or stolen by another call's Receive before
+	// its own Receive ran), surfacing as a bare "no response available"
+	// error with no corresponding request ever reaching the MCP server.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if !h.connected {
 		return fmt.Errorf("transport not connected")
@@ -276,8 +285,10 @@ func (h *authStreamingHTTPTransport) Send(message *mcp.Message) error {
 }
 
 func (h *authStreamingHTTPTransport) Receive() (*mcp.Message, error) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	// Write lock — mutates h.lastResponse (clears it after reading). See
+	// Send's comment above for why RLock was wrong here.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if !h.connected {
 		return nil, fmt.Errorf("transport not connected")
@@ -342,8 +353,12 @@ func (h *authSSETransport) Close() error {
 }
 
 func (h *authSSETransport) Send(message *mcp.Message) error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	// Write lock, not RLock — same reasoning as authStreamingHTTPTransport's
+	// Send just above: this mutates h.lastResponse/h.sessionURL/
+	// h.sseConnection, shared across concurrent callers of one transport
+	// instance.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if !h.connected {
 		return fmt.Errorf("transport not connected")
@@ -572,8 +587,9 @@ func (h *authSSETransport) sendSessionRequest(message *mcp.Message) error {
 }
 
 func (h *authSSETransport) Receive() (*mcp.Message, error) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	// Write lock — mutates h.lastResponse (clears it after reading).
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if !h.connected {
 		return nil, fmt.Errorf("transport not connected")
