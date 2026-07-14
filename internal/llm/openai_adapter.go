@@ -204,6 +204,53 @@ func (o *OpenAIAdapter) getBaseURL() string {
 }
 
 // Call implements the ModelProvider interface for a single request/response.
+// buildChatRequestBody assembles the Chat Completions request body shared by
+// Call (stream=false) and Stream (stream=true) — single source of truth so
+// the two call sites can't drift apart on it again. "stream" is always sent
+// explicitly, never omitted: some OpenAI-compatible gateways ignore an
+// absent field and default to SSE regardless (observed live against a real
+// gateway — a missing "stream" key on Call() made every response come back
+// as "data: {...}" chunks, which the non-streaming response parser then
+// failed to decode as a single JSON object, a json.SyntaxError on every
+// call). vLLM/MLFlow Gateway/BentoML/AI Foundry Local embed *OpenAIAdapter
+// for code reuse (see their own adapter files), so this fix covers them too
+// without touching each one individually.
+func (o *OpenAIAdapter) buildChatRequestBody(messages []map[string]interface{}, maxTokens int, temperature float32, stream bool) map[string]interface{} {
+	reqBody := map[string]interface{}{
+		"model":       o.model,
+		"messages":    messages,
+		"max_tokens":  maxTokens,
+		"temperature": temperature,
+		"stream":      stream,
+	}
+	// Extended sampling parameters, if set (for vLLM compatibility).
+	if o.topP > 0 {
+		reqBody["top_p"] = o.topP
+	}
+	if o.topK > 0 {
+		reqBody["top_k"] = o.topK
+	}
+	if o.presencePenalty != 0 {
+		reqBody["presence_penalty"] = o.presencePenalty
+	}
+	if o.frequencyPenalty != 0 {
+		reqBody["frequency_penalty"] = o.frequencyPenalty
+	}
+	if o.repetitionPenalty != 0 {
+		reqBody["repetition_penalty"] = o.repetitionPenalty
+	}
+	if len(o.stop) > 0 {
+		reqBody["stop"] = o.stop
+	}
+	if o.responseFormat != nil {
+		reqBody["response_format"] = o.responseFormat
+	}
+	if o.cachePrompt {
+		reqBody["cache_prompt"] = true
+	}
+	return reqBody
+}
+
 func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, error) {
 	// Create observability span
 	tracer := otel.Tracer("agenticgokit.llm")
@@ -268,39 +315,7 @@ func (o *OpenAIAdapter) Call(ctx context.Context, prompt Prompt) (Response, erro
 		"content": userContent,
 	})
 
-	// Build request body with extended parameters
-	reqBody := map[string]interface{}{
-		"model":       o.model,
-		"messages":    messages,
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
-	}
-
-	// Add extended sampling parameters if set (for vLLM compatibility)
-	if o.topP > 0 {
-		reqBody["top_p"] = o.topP
-	}
-	if o.topK > 0 {
-		reqBody["top_k"] = o.topK
-	}
-	if o.presencePenalty != 0 {
-		reqBody["presence_penalty"] = o.presencePenalty
-	}
-	if o.frequencyPenalty != 0 {
-		reqBody["frequency_penalty"] = o.frequencyPenalty
-	}
-	if o.repetitionPenalty != 0 {
-		reqBody["repetition_penalty"] = o.repetitionPenalty
-	}
-	if len(o.stop) > 0 {
-		reqBody["stop"] = o.stop
-	}
-	if o.responseFormat != nil {
-		reqBody["response_format"] = o.responseFormat
-	}
-	if o.cachePrompt {
-		reqBody["cache_prompt"] = true
-	}
+	reqBody := o.buildChatRequestBody(messages, maxTokens, temperature, false)
 
 	requestBody, err := json.Marshal(reqBody)
 	if err != nil {
@@ -463,34 +478,7 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 		"content": userContent,
 	})
 
-	// Build request body with extended parameters
-	reqBody := map[string]interface{}{
-		"model":       o.model,
-		"messages":    messages,
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
-		"stream":      true, // Enable streaming
-	}
-
-	// Add extended sampling parameters if set (for vLLM compatibility)
-	if o.topP > 0 {
-		reqBody["top_p"] = o.topP
-	}
-	if o.topK > 0 {
-		reqBody["top_k"] = o.topK
-	}
-	if o.presencePenalty != 0 {
-		reqBody["presence_penalty"] = o.presencePenalty
-	}
-	if o.frequencyPenalty != 0 {
-		reqBody["frequency_penalty"] = o.frequencyPenalty
-	}
-	if o.repetitionPenalty != 0 {
-		reqBody["repetition_penalty"] = o.repetitionPenalty
-	}
-	if len(o.stop) > 0 {
-		reqBody["stop"] = o.stop
-	}
+	reqBody := o.buildChatRequestBody(messages, maxTokens, temperature, true)
 
 	requestBody, err := json.Marshal(reqBody)
 	if err != nil {

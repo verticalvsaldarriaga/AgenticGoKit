@@ -101,6 +101,32 @@ func buildOpenRouterMessages(prompt Prompt) []map[string]interface{} {
 	return messages
 }
 
+// buildChatRequestBody assembles the Chat Completions request body shared by
+// Call (stream=false) and Stream (stream=true) — single source of truth so
+// the two call sites can't drift apart on it, mirroring OpenAIAdapter's own
+// buildChatRequestBody (openai_adapter.go). "stream" is always sent
+// explicitly, never omitted: some OpenAI-compatible gateways ignore an
+// absent field and default to SSE regardless (observed live — a missing
+// "stream" key on a non-streaming Call() made the gateway return
+// "data: {...}" chunks, which the non-streaming response parser then failed
+// to decode as a single JSON object).
+func (o *OpenRouterAdapter) buildChatRequestBody(messages []map[string]interface{}, maxTokens int, temperature float32, stream bool) map[string]interface{} {
+	reqBody := map[string]interface{}{
+		"model":       o.model,
+		"messages":    messages,
+		"max_tokens":  maxTokens,
+		"temperature": temperature,
+		"stream":      stream,
+	}
+	if o.responseFormat != nil {
+		reqBody["response_format"] = o.responseFormat
+	}
+	if o.cachePrompt {
+		reqBody["cache_prompt"] = true
+	}
+	return reqBody
+}
+
 // Call implements the ModelProvider interface for a single request/response.
 func (o *OpenRouterAdapter) Call(ctx context.Context, prompt Prompt) (Response, error) {
 	// Create observability span
@@ -151,18 +177,7 @@ func (o *OpenRouterAdapter) Call(ctx context.Context, prompt Prompt) (Response, 
 	// Build messages array for Chat Completions API
 	messages := buildOpenRouterMessages(prompt)
 
-	reqBody := map[string]interface{}{
-		"model":       o.model,
-		"messages":    messages,
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
-	}
-	if o.responseFormat != nil {
-		reqBody["response_format"] = o.responseFormat
-	}
-	if o.cachePrompt {
-		reqBody["cache_prompt"] = true
-	}
+	reqBody := o.buildChatRequestBody(messages, maxTokens, temperature, false)
 
 	requestBody, err := json.Marshal(reqBody)
 	if err != nil {
@@ -338,19 +353,7 @@ func (o *OpenRouterAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan T
 	messages := buildOpenRouterMessages(prompt)
 
 	// Create streaming request
-	streamReqBody := map[string]interface{}{
-		"model":       o.model,
-		"messages":    messages,
-		"max_tokens":  maxTokens,
-		"temperature": temperature,
-		"stream":      true, // Enable streaming
-	}
-	if o.responseFormat != nil {
-		streamReqBody["response_format"] = o.responseFormat
-	}
-	if o.cachePrompt {
-		streamReqBody["cache_prompt"] = true
-	}
+	streamReqBody := o.buildChatRequestBody(messages, maxTokens, temperature, true)
 
 	requestBody, err := json.Marshal(streamReqBody)
 	if err != nil {
