@@ -3,7 +3,10 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -201,6 +204,15 @@ func TestDefaultIsRetryable(t *testing.T) {
 		{"context canceled", context.Canceled, true},
 		{"net timeout", &net.DNSError{IsTimeout: true}, true},
 		{"generic error", errors.New("boom"), false},
+		{"api status 530 (Cloudflare origin unreachable)", &APIStatusError{StatusCode: 530}, true},
+		{"api status 502", &APIStatusError{StatusCode: 502}, true},
+		{"api status 503", &APIStatusError{StatusCode: 503}, true},
+		{"api status 429 (rate limited)", &APIStatusError{StatusCode: 429}, true},
+		{"api status 500", &APIStatusError{StatusCode: 500}, true},
+		{"api status 401 (auth failure)", &APIStatusError{StatusCode: 401}, false},
+		{"api status 400 (bad request)", &APIStatusError{StatusCode: 400}, false},
+		{"api status 404", &APIStatusError{StatusCode: 404}, false},
+		{"wrapped api status 503", fmt.Errorf("call failed: %w", &APIStatusError{StatusCode: 503}), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -229,5 +241,50 @@ func TestProviderFactory_CreateProvider_WrapsWithCircuitBreakerOnlyWhenConfigure
 	}
 	if _, wrapped := p2.(*CircuitBreakerProvider); !wrapped {
 		t.Fatal("provider should be wrapped when RetryPolicy is set")
+	}
+}
+
+// TestCircuitBreakerProvider_RetriesRealAdapterGatewayError is an
+// end-to-end regression test for the exact failure class this fix targets:
+// a real OpenAI-compatible adapter hitting a gateway error (modeled here as
+// 530, a Cloudflare origin-unreachable status observed live against a real
+// endpoint) must be retried by CircuitBreakerProvider, not just by the
+// isolated DefaultIsRetryable table test above.
+func TestCircuitBreakerProvider_RetriesRealAdapterGatewayError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(530)
+			w.Write([]byte("error code: 1033"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	adapter, err := NewOpenAIAdapterWithConfig(OpenAIAdapterConfig{
+		APIKey:  "test-key",
+		Model:   "test-model",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error building adapter: %v", err)
+	}
+
+	p := NewCircuitBreakerProvider(adapter, CircuitBreakerProviderConfig{
+		Retry: RetryPolicy{MaxRetries: 3, BackoffFunc: noBackoff},
+	})
+
+	resp, err := p.Call(context.Background(), Prompt{User: "hello"})
+	if err != nil {
+		t.Fatalf("expected the 530s to be retried and the 3rd attempt to succeed, got: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("got %d attempts, want 3 (2 retried 530s + 1 success)", attempts)
+	}
+	if resp.Content != "OK" {
+		t.Fatalf("got content %q, want %q", resp.Content, "OK")
 	}
 }

@@ -38,10 +38,21 @@ type RetryPolicy struct {
 	BackoffFunc func(attempt int) time.Duration
 }
 
-// DefaultIsRetryable classifies context deadline/cancellation and net.Error
+// DefaultIsRetryable classifies context deadline/cancellation, net.Error
 // (including timeouts surfaced through wrapped chains, e.g. an http.Client
-// body-read timeout) as retryable. errors.Is/As based, not string-matched,
-// so it survives error-message wording changes upstream.
+// body-read timeout), and an *APIStatusError with a 429 or 5xx status as
+// retryable. errors.Is/As based, not string-matched, so it survives
+// error-message wording changes upstream.
+//
+// A completed HTTP round-trip carrying a gateway error (502/503/524, a
+// Cloudflare edge error like 530, or a 429 rate limit) is not a net.Error —
+// it's a successful response with a non-2xx status, surfaced by this
+// package's adapters as *APIStatusError (openai_adapter.go). Without this
+// case, MaxRetries would only cover network/timeout failures and silently
+// not retry the exact class of failure most likely to be transient: the
+// origin/gateway itself being briefly unavailable. 4xx other than 429 (bad
+// request, auth failure, not found) is not retryable — retrying won't fix a
+// malformed request or bad credentials.
 func DefaultIsRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -50,7 +61,14 @@ func DefaultIsRetryable(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr)
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var apiErr *APIStatusError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+	}
+	return false
 }
 
 func defaultBackoff(attempt int) time.Duration {

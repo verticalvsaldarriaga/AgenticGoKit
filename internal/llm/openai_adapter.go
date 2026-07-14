@@ -521,9 +521,12 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan Token
 	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		// Read before Close — reading an already-closed response body
+		// returns empty/error, which silently dropped the actual error body
+		// on every non-200 stream-setup failure before this fix.
 		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("API error: %d - %s", resp.StatusCode, string(body))
+		resp.Body.Close()
+		err := &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, fmt.Sprintf("API error: status %d", resp.StatusCode))
 		return nil, err
@@ -667,7 +670,7 @@ func (o *OpenAIAdapter) Embeddings(ctx context.Context, texts []string) ([][]flo
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embeddings API error: %s", string(body))
+		return nil, &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var response struct {
