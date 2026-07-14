@@ -268,6 +268,7 @@ func (f *ProviderFactory) createAzureProvider(config ProviderConfig) (ModelProvi
 		EmbeddingDeployment: config.EmbeddingDeployment,
 		HTTPClient:          f.httpClient,
 		APIVersion:          config.APIVersion,
+		ResponseFormat:      config.ResponseFormat,
 	}
 
 	return NewAzureOpenAIAdapter(options)
@@ -307,7 +308,7 @@ func (f *ProviderFactory) createOpenRouterProvider(config ProviderConfig) (Model
 		model = "openai/gpt-3.5-turbo" // Default model
 	}
 
-	return NewOpenRouterAdapter(
+	adapter, err := NewOpenRouterAdapter(
 		config.APIKey,
 		model,
 		baseURL,
@@ -316,6 +317,12 @@ func (f *ProviderFactory) createOpenRouterProvider(config ProviderConfig) (Model
 		config.SiteURL,
 		config.SiteName,
 	)
+	if err != nil {
+		return nil, err
+	}
+	adapter.responseFormat = config.ResponseFormat
+	adapter.cachePrompt = config.CachePrompt
+	return adapter, nil
 }
 
 // createHuggingFaceProvider creates a Hugging Face provider
@@ -398,6 +405,8 @@ func (f *ProviderFactory) createVLLMProvider(config ProviderConfig) (ModelProvid
 		IgnoreEOS:         config.VLLMIgnoreEOS,
 		Stop:              config.VLLMStop,
 		HTTPTimeout:       config.HTTPTimeout,
+		ResponseFormat:    config.ResponseFormat,
+		CachePrompt:       config.CachePrompt,
 	}
 
 	return NewVLLMAdapter(vllmConfig)
@@ -429,6 +438,8 @@ func (f *ProviderFactory) createMLFlowGatewayProvider(config ProviderConfig) (Mo
 		MaxRetries:       config.MLFlowMaxRetries,
 		RetryDelay:       config.MLFlowRetryDelay,
 		HTTPTimeout:      config.HTTPTimeout,
+		ResponseFormat:   config.ResponseFormat,
+		CachePrompt:      config.CachePrompt,
 	}
 
 	return NewMLFlowGatewayAdapter(mlflowConfig)
@@ -462,6 +473,8 @@ func (f *ProviderFactory) createBentoMLProvider(config ProviderConfig) (ModelPro
 		MaxRetries:       config.BentoMLMaxRetries,
 		RetryDelay:       config.BentoMLRetryDelay,
 		HTTPTimeout:      config.HTTPTimeout,
+		ResponseFormat:   config.ResponseFormat,
+		CachePrompt:      config.CachePrompt,
 	}
 
 	return NewBentoMLAdapter(bentomlConfig)

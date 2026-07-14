@@ -38,6 +38,14 @@ type BentoMLConfig struct {
 
 	// HTTP configuration
 	HTTPTimeout time.Duration `json:"http_timeout,omitempty" toml:"http_timeout"`
+
+	// ResponseFormat, when non-nil, is passed through verbatim as the
+	// request body's "response_format" field. BentoML's OpenAI-compatible
+	// endpoint reuses OpenAIAdapterConfig's field.
+	ResponseFormat interface{} `json:"response_format,omitempty" toml:"response_format,omitempty"`
+
+	// CachePrompt, when true, sets the request body's "cache_prompt" field.
+	CachePrompt bool `json:"cache_prompt,omitempty" toml:"cache_prompt,omitempty"`
 }
 
 // BentoMLAdapter wraps the OpenAI adapter for BentoML inference servers.
@@ -86,6 +94,8 @@ func NewBentoMLAdapter(config BentoMLConfig) (*BentoMLAdapter, error) {
 		PresencePenalty:  config.PresencePenalty,
 		FrequencyPenalty: config.FrequencyPenalty,
 		Stop:             config.Stop,
+		ResponseFormat:   config.ResponseFormat,
+		CachePrompt:      config.CachePrompt,
 	}
 
 	openaiAdapter, err := NewOpenAIAdapterWithConfig(openaiConfig)

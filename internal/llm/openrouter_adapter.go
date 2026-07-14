@@ -29,6 +29,14 @@ type OpenRouterAdapter struct {
 	siteURL     string // Optional: for rankings (HTTP-Referer header)
 	siteName    string // Optional: for rankings (X-Title header)
 	httpClient  *http.Client
+
+	// responseFormat/cachePrompt are set directly by factory.go
+	// (createOpenRouterProvider), same package, rather than adding params
+	// to NewOpenRouterAdapter's constructor and breaking its existing
+	// positional-argument callers (e.g. wrappers.go's
+	// NewOpenRouterAdapterWrapped).
+	responseFormat interface{}
+	cachePrompt    bool
 }
 
 // NewOpenRouterAdapter creates a new OpenRouterAdapter instance.
@@ -143,12 +151,20 @@ func (o *OpenRouterAdapter) Call(ctx context.Context, prompt Prompt) (Response, 
 	// Build messages array for Chat Completions API
 	messages := buildOpenRouterMessages(prompt)
 
-	requestBody, err := json.Marshal(map[string]interface{}{
+	reqBody := map[string]interface{}{
 		"model":       o.model,
 		"messages":    messages,
 		"max_tokens":  maxTokens,
 		"temperature": temperature,
-	})
+	}
+	if o.responseFormat != nil {
+		reqBody["response_format"] = o.responseFormat
+	}
+	if o.cachePrompt {
+		reqBody["cache_prompt"] = true
+	}
+
+	requestBody, err := json.Marshal(reqBody)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to marshal request")
@@ -322,13 +338,21 @@ func (o *OpenRouterAdapter) Stream(ctx context.Context, prompt Prompt) (<-chan T
 	messages := buildOpenRouterMessages(prompt)
 
 	// Create streaming request
-	requestBody, err := json.Marshal(map[string]interface{}{
+	streamReqBody := map[string]interface{}{
 		"model":       o.model,
 		"messages":    messages,
 		"max_tokens":  maxTokens,
 		"temperature": temperature,
 		"stream":      true, // Enable streaming
-	})
+	}
+	if o.responseFormat != nil {
+		streamReqBody["response_format"] = o.responseFormat
+	}
+	if o.cachePrompt {
+		streamReqBody["cache_prompt"] = true
+	}
+
+	requestBody, err := json.Marshal(streamReqBody)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to marshal request")

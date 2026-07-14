@@ -40,6 +40,14 @@ type MLFlowGatewayConfig struct {
 
 	// HTTP configuration
 	HTTPTimeout time.Duration `json:"http_timeout,omitempty" toml:"http_timeout"`
+
+	// ResponseFormat, when non-nil, is passed through verbatim as the
+	// request body's "response_format" field. MLFlow Gateway routes are
+	// OpenAI-compatible, so this reuses OpenAIAdapterConfig's field.
+	ResponseFormat interface{} `json:"response_format,omitempty" toml:"response_format,omitempty"`
+
+	// CachePrompt, when true, sets the request body's "cache_prompt" field.
+	CachePrompt bool `json:"cache_prompt,omitempty" toml:"cache_prompt,omitempty"`
 }
 
 // MLFlowGatewayAdapter wraps the OpenAI adapter for MLFlow AI Gateway.
@@ -90,10 +98,12 @@ func NewMLFlowGatewayAdapter(config MLFlowGatewayConfig) (*MLFlowGatewayAdapter,
 		MaxTokens:    config.MaxTokens,
 		Temperature:  config.Temperature,
 		BaseURL:      baseURL,
-		ExtraHeaders: config.ExtraHeaders,
-		HTTPTimeout:  config.HTTPTimeout,
-		TopP:         config.TopP,
-		Stop:         config.Stop,
+		ExtraHeaders:   config.ExtraHeaders,
+		HTTPTimeout:    config.HTTPTimeout,
+		TopP:           config.TopP,
+		Stop:           config.Stop,
+		ResponseFormat: config.ResponseFormat,
+		CachePrompt:    config.CachePrompt,
 	}
 
 	openaiAdapter, err := NewOpenAIAdapterWithConfig(openaiConfig)
