@@ -117,6 +117,15 @@ func WithDebugMode(enabled bool) Option {
 	}
 }
 
+// WithMiddleware registers one or more AgentMiddleware, appended to any
+// already set. Order matters: BeforeRun runs in this order, AfterRun in
+// reverse (see AgentMiddleware doc comment).
+func WithMiddleware(mw ...AgentMiddleware) Option {
+	return func(c *Config) {
+		c.Middlewares = append(c.Middlewares, mw...)
+	}
+}
+
 // MemoryOption defines functional options for memory configuration
 type MemoryOption func(*MemoryConfig)
 

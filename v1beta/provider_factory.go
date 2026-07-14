@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/agenticgokit/agenticgokit/core"
+	"github.com/agenticgokit/agenticgokit/internal/core/error_handling"
 	"github.com/agenticgokit/agenticgokit/internal/llm"
 
 	// Register memory providers
@@ -46,6 +47,18 @@ func createLLMProvider(config LLMConfig) (llm.ModelProvider, error) {
 
 	if llmConfig.Type == llm.ProviderTypeAzureOpenAI && llmConfig.Endpoint == "" && llmConfig.BaseURL != "" {
 		llmConfig.Endpoint = llmConfig.BaseURL
+	}
+
+	if config.MaxRetries > 0 {
+		llmConfig.RetryPolicy = &llm.RetryPolicy{MaxRetries: config.MaxRetries}
+	}
+	if config.CircuitBreaker != nil && config.CircuitBreaker.Enabled {
+		llmConfig.CircuitBreaker = error_handling.NewCircuitBreakerImplementation(&core.CircuitBreakerConfig{
+			FailureThreshold:   config.CircuitBreaker.FailureThreshold,
+			SuccessThreshold:   config.CircuitBreaker.SuccessThreshold,
+			Timeout:            config.CircuitBreaker.Timeout,
+			MaxConcurrentCalls: config.CircuitBreaker.HalfOpenMaxCalls,
+		})
 	}
 
 	// Use the internal/llm factory to create the provider

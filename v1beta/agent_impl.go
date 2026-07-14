@@ -88,6 +88,7 @@ type realAgent struct {
 	llmProvider    llm.ModelProvider // LLM provider (Ollama, OpenAI, Azure, etc.)
 	memoryProvider core.Memory       // Memory provider (optional, for context/RAG)
 	tools          []Tool            // Tools available to the agent (optional)
+	middlewares    []AgentMiddleware // Run around execute(); see AgentMiddleware doc comment
 
 	// Runtime state
 	initialized bool
@@ -155,6 +156,7 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 		handler:     handler,
 		initialized: false,
 		sessions:    make(map[string]*sessionState),
+		middlewares: config.Middlewares,
 		metrics: &agentMetrics{
 			totalRuns:     0,
 			totalErrors:   0,
@@ -188,11 +190,11 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 		// "unset" and just assumed true either way — meaning
 		// &MemoryConfig{Enabled: false} (the ONLY way to opt out of the
 		// nil-defaults-to-chromem behavior above) was silently overridden
-		// back to enabled. Confirmed live: cubejs-agentic-chat's Planning/
-		// Router/Consolidation agents all explicitly disable memory (they
-		// have their own memory-retrieval path and don't want this
-		// framework's automatic chromem-backed enrichment+auto-store), and
-		// every .Info() log line proved it was running anyway. A caller
+		// back to enabled. Confirmed live: a downstream agent that
+		// explicitly disables memory (it has its own memory-retrieval path
+		// and doesn't want this framework's automatic chromem-backed
+		// enrichment+auto-store) had every .Info() log line proving it was
+		// running anyway. A caller
 		// that provides a non-nil *MemoryConfig is explicit about intent by
 		// definition — trust config.Memory.Enabled as given; only fill in
 		// the embedding-provider smart-defaults below when they actually
@@ -294,8 +296,70 @@ func (a *realAgent) Run(ctx context.Context, input string) (*Result, error) {
 	return a.execute(ctx, input, nil)
 }
 
-// execute contains the core execution logic, shared between Run and RunWithOptions
+// execute wraps executeInner with AgentMiddleware's BeforeRun/AfterRun (see
+// AgentMiddleware doc comment for ordering and scope). With no middlewares
+// registered (a.middlewares is nil — every existing caller, today) this is
+// behaviorally identical to calling executeInner directly.
 func (a *realAgent) execute(ctx context.Context, input string, opts *RunOptions) (*Result, error) {
+	ctx, input, err := a.runBeforeMiddleware(ctx, input, opts)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.executeInner(ctx, input, opts)
+	return a.runAfterMiddleware(ctx, input, result, err, opts)
+}
+
+// skippedMiddleware returns a lookup set built from opts.SkipMiddleware.
+// Safe to call with a nil opts or empty SkipMiddleware; the returned nil map
+// makes every lookup false, so callers don't need a separate nil check.
+func skippedMiddleware(opts *RunOptions) map[string]bool {
+	if opts == nil || len(opts.SkipMiddleware) == 0 {
+		return nil
+	}
+	skip := make(map[string]bool, len(opts.SkipMiddleware))
+	for _, name := range opts.SkipMiddleware {
+		skip[name] = true
+	}
+	return skip
+}
+
+// runBeforeMiddleware runs each non-skipped middleware's BeforeRun in
+// registration order, threading ctx/input through the chain. The first
+// error aborts the run before executeInner is called (no LLM call happens).
+func (a *realAgent) runBeforeMiddleware(ctx context.Context, input string, opts *RunOptions) (context.Context, string, error) {
+	skip := skippedMiddleware(opts)
+	for _, mw := range a.middlewares {
+		if skip[mw.Name()] {
+			continue
+		}
+		var err error
+		ctx, input, err = mw.BeforeRun(ctx, input)
+		if err != nil {
+			return ctx, input, NewAgentErrorWithError(ErrMiddlewareBeforeRun,
+				fmt.Sprintf("middleware %q BeforeRun failed", mw.Name()), err)
+		}
+	}
+	return ctx, input, nil
+}
+
+// runAfterMiddleware runs each non-skipped middleware's AfterRun in reverse
+// registration order (LIFO), each stage seeing the result/err the previous
+// stage (or executeInner) produced. See AgentMiddleware doc comment for why
+// AfterRun's returned error is passed through unwrapped.
+func (a *realAgent) runAfterMiddleware(ctx context.Context, input string, result *Result, runErr error, opts *RunOptions) (*Result, error) {
+	skip := skippedMiddleware(opts)
+	for i := len(a.middlewares) - 1; i >= 0; i-- {
+		mw := a.middlewares[i]
+		if skip[mw.Name()] {
+			continue
+		}
+		result, runErr = mw.AfterRun(ctx, input, result, runErr)
+	}
+	return result, runErr
+}
+
+// executeInner contains the core execution logic, shared between Run and RunWithOptions
+func (a *realAgent) executeInner(ctx context.Context, input string, opts *RunOptions) (*Result, error) {
 	startTime := time.Now()
 
 	tracer := observability.GetTracer("agk.v1beta.agent")
