@@ -383,9 +383,17 @@ func (a *realAgent) executeInner(ctx context.Context, input string, opts *RunOpt
 		return nil, fmt.Errorf("agent not properly initialized: LLM provider is nil")
 	}
 
-	// Step 1: Build the prompt with system context and user input
+	// Step 1: Build the prompt with system context and user input.
+	// SystemPrompt goes through core.FormatPromptString (GoTemplate syntax)
+	// before use — a plain-text prompt with no {{ }} directives passes
+	// through unchanged, but callers can now build SystemPrompt with
+	// {{.Input}} or other vars instead of "+=" string concatenation.
+	systemPrompt, err := core.FormatPromptString(a.config.SystemPrompt, map[string]any{"Input": input}, core.FormatGoTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("agent %s: format system prompt: %w", a.config.Name, err)
+	}
 	prompt := llm.Prompt{
-		System: a.config.SystemPrompt,
+		System: systemPrompt,
 		User:   input,
 	}
 
@@ -393,7 +401,7 @@ func (a *realAgent) executeInner(ctx context.Context, input string, opts *RunOpt
 	if observability.IsDetailedTracing() {
 		span.SetAttributes(
 			attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(input, observability.MaxContentLength)),
-			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(a.config.SystemPrompt, observability.MaxContentLength)),
+			attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(systemPrompt, observability.MaxContentLength)),
 		)
 	}
 
@@ -937,9 +945,22 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 
 		startTime := time.Now()
 
-		// Build prompt (similar to Run method)
+		// Build prompt (similar to Run method). SystemPrompt goes through
+		// core.FormatPromptString the same way the non-streaming path does —
+		// see executeInner for why.
+		systemPrompt, err := core.FormatPromptString(a.config.SystemPrompt, map[string]any{"Input": input}, core.FormatGoTemplate)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			writer.Write(&StreamChunk{
+				Type:  ChunkTypeError,
+				Error: fmt.Errorf("agent %s: format system prompt: %w", a.config.Name, err),
+			})
+			a.updateMetrics(startTime, true)
+			return
+		}
 		prompt := llm.Prompt{
-			System: a.config.SystemPrompt,
+			System: systemPrompt,
 			User:   input,
 			Parameters: llm.ModelParameters{
 				Temperature: convertFloat32ToFloat32Ptr(a.config.LLM.Temperature),
@@ -951,7 +972,7 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 		if observability.IsDetailedTracing() {
 			span.SetAttributes(
 				attribute.String(observability.AttrPromptUser, observability.TruncateForTrace(input, observability.MaxContentLength)),
-				attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(a.config.SystemPrompt, observability.MaxContentLength)),
+				attribute.String(observability.AttrPromptSystem, observability.TruncateForTrace(systemPrompt, observability.MaxContentLength)),
 			)
 		}
 
