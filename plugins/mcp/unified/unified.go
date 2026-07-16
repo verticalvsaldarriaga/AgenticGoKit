@@ -102,13 +102,13 @@ type authSSETransport struct {
 	sseConnection *http.Response
 }
 
-func newAuthStreamingHTTPTransport(baseURL, endpoint, token string) *authStreamingHTTPTransport {
+func newAuthStreamingHTTPTransport(baseURL, endpoint, token string, timeout time.Duration) *authStreamingHTTPTransport {
 	return &authStreamingHTTPTransport{
 		baseURL:   baseURL,
 		endpoint:  endpoint,
 		authToken: token,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -319,13 +319,13 @@ func (h *authStreamingHTTPTransport) IsConnected() bool {
 }
 
 // SSE Transport implementation
-func newAuthSSETransport(baseURL, endpoint, token string) *authSSETransport {
+func newAuthSSETransport(baseURL, endpoint, token string, timeout time.Duration) *authSSETransport {
 	return &authSSETransport{
 		baseURL:   baseURL,
 		endpoint:  endpoint,
 		authToken: token,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -946,6 +946,17 @@ func (m *unifiedMCPManager) discoverToolsFromServer(ctx context.Context, serverN
 
 // createClientForServer creates appropriate client based on server type
 func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) (*client.Client, error) {
+	// ConnectionTimeout doubles as the per-call response-wait timeout here —
+	// every call builds a fresh client/session (no connection reuse across
+	// ExecuteTool invocations), so there's no separate "connect vs. call"
+	// distinction to preserve. Falls back to 30s (the previous hardcoded
+	// value) when unset, so callers that never configure it keep today's
+	// behavior.
+	timeout := m.config.ConnectionTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
 	newClient := func(tr transport.Transport) *client.Client {
 		logger := log.New(io.Discard, "", 0)
 		if v := os.Getenv("MCP_NAVIGATOR_DEBUG"); v != "" && v != "0" {
@@ -955,7 +966,7 @@ func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) 
 		cfg := client.ClientConfig{
 			Name:    "agentflow-mcp-client",
 			Version: "1.0.0",
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 			Logger:  logger,
 		}
 
@@ -996,7 +1007,7 @@ func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) 
 
 		// Always use the custom SSE transport — it handles SSE-formatted responses
 		// and session IDs correctly. Pass empty token when no auth is needed.
-		sseTransport := newAuthSSETransport(baseURL, ssePath, authToken)
+		sseTransport := newAuthSSETransport(baseURL, ssePath, authToken, timeout)
 		return newClient(sseTransport), nil
 
 	case "http_streaming":
@@ -1028,7 +1039,7 @@ func (m *unifiedMCPManager) createClientForServer(server *core.MCPServerConfig) 
 
 		// Always use the custom streaming transport — it handles SSE-formatted responses
 		// and session IDs correctly. Pass empty token when no auth is needed.
-		streamingTransport := newAuthStreamingHTTPTransport(baseURL, streamPath, authToken)
+		streamingTransport := newAuthStreamingHTTPTransport(baseURL, streamPath, authToken, timeout)
 		return newClient(streamingTransport), nil
 
 	case "websocket":
