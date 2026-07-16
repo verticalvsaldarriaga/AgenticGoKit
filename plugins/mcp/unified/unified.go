@@ -27,6 +27,15 @@ func logger() *zerolog.Logger {
 	return logging.GetLogger()
 }
 
+// maxSSELineSize bounds bufio.Scanner's per-line buffer for SSE frame
+// parsing below — bufio.Scanner's own default (64KB) silently truncates
+// scanning (Scan() returns false, Err() becomes bufio.ErrTooLong) on a
+// single "data:" line beyond that size, with no error surfaced unless the
+// caller checks Err(). Confirmed live 2026-07-16: a real MCP tool response
+// (a full-schema discovery call covering many resources) measured ~107KB in
+// one such line — comfortably past the default, nowhere near this bound.
+const maxSSELineSize = 10 * 1024 * 1024 // 10MB
+
 // normalizeToolArgs defensively unwraps arguments of the form:
 // {"input":"{\"k\":\"v\"}"} -> {"k":"v"}
 // This preserves direct JSON object arguments expected by many MCP tools.
@@ -238,8 +247,20 @@ func (h *authStreamingHTTPTransport) Send(message *mcp.Message) error {
 	if looksLikeSSE {
 		logger().Debug().Msg("[Streaming] Response is in SSE format, parsing...")
 
-		// Parse SSE format to extract JSON data
+		// Parse SSE format to extract JSON data. bufio.Scanner defaults to a
+		// 64KB max token (line) size — confirmed live 2026-07-16: a
+		// describe_data response (full schema, every cube) can exceed that
+		// in one "data:" line. When it does, Scan() stops silently (returns
+		// false, sets Err() to bufio.ErrTooLong) with messageData still "",
+		// and the code below previously treated that identically to "no
+		// data line present" — Send() returned nil (no error), Receive()
+		// then found nothing stored and returned the misleading
+		// "no response available", with no hint the real cause was a
+		// too-long line. maxSSELineSize gives real payloads headroom; Err()
+		// is now checked so a genuine overflow surfaces as a real error
+		// instead of a silent empty response.
 		scanner := bufio.NewScanner(bytes.NewReader(body))
+		scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineSize)
 		var currentEvent string
 		var messageData string
 
@@ -254,6 +275,9 @@ func (h *authStreamingHTTPTransport) Send(message *mcp.Message) error {
 					break
 				}
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("SSE response line exceeded %d bytes (or scan failed): %w", maxSSELineSize, err)
 		}
 
 		if messageData == "" {
@@ -407,6 +431,7 @@ func (h *authSSETransport) sendInitializeRequest(message *mcp.Message) error {
 	// event: endpoint
 	// data: <session-url>
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineSize)
 	var currentEvent string
 	var sessionEndpoint string
 
@@ -519,6 +544,7 @@ func (h *authSSETransport) sendMessageToSession(message *mcp.Message) error {
 
 		// Read events from SSE stream until we get a message response
 		scanner := bufio.NewScanner(h.sseConnection.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineSize)
 		var currentEvent string
 		var messageData string
 
