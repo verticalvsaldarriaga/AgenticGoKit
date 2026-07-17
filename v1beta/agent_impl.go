@@ -574,9 +574,21 @@ func (a *realAgent) executeInner(ctx context.Context, input string, opts *RunOpt
 				}
 				return resp.Content, nil
 			},
-			// Tools and Memory would be provided here if available
-			// Tools:  a.tools,
-			// Memory: a.memoryProvider,
+			// Tools: real as of this fix (sliceToolManager, capabilities_tools.go)
+			// — reads a.tools fresh so RunWithOptions' per-call ToolMode
+			// filtering (see :776-796) is respected. nil only when no tools
+			// were configured, same contract docs/custom-handlers.md's own
+			// "Capability Checks" section already tells callers to expect.
+			//
+			// Memory: still nil. a.memoryProvider is core.Memory (legacy,
+			// different method signatures — Store(ctx,content,tags...) vs
+			// v1beta.Memory's Store(ctx,content,opts...StoreOption), and no
+			// IngestDocument/SearchKnowledge/BuildContext at all) — cannot be
+			// wired without either a lossy adapter or an interface-level
+			// decision, tracked separately, not bundled into this fix.
+		}
+		if len(a.tools) > 0 {
+			capabilities.Tools = newSliceToolManager(a.tools)
 		}
 
 		handlerResponse, err := a.handler(ctx, finalResponse, capabilities)
@@ -1116,6 +1128,11 @@ func (a *realAgent) RunStream(ctx context.Context, input string, opts ...StreamO
 					}
 					return resp.Content, nil
 				},
+			}
+			// Mirrors execute()'s wiring above — see its comment for why
+			// Tools is real (sliceToolManager) and Memory is still nil.
+			if len(a.tools) > 0 {
+				capabilities.Tools = newSliceToolManager(a.tools)
 			}
 			handlerResponse, err := a.handler(streamCtx, finalContent, capabilities)
 			if err != nil {
