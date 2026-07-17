@@ -152,3 +152,34 @@ func TestLoadCatalog_EmptyDirIsNotAnError(t *testing.T) {
 		t.Errorf("Render() = %q, want empty for an empty catalog", cat.Render())
 	}
 }
+
+// Confirms this package's init() self-registers the declarative path
+// (v1beta.SetSkillsProviderFactory) purely by being imported — a caller
+// only has to set Config.Tools.Skills.Dir (TOML-loadable) and blank-import
+// this package; no Install() call needed. v1beta.GetSkillsProviderFactory
+// is the only external signal for "did init() actually run" short of a
+// live Build() call — see its doc comment.
+func TestInit_SelfRegistersDeclarativeFactory(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "declarative-skill", "trigger: test", "declarative body")
+
+	factory := v1beta.GetSkillsProviderFactory()
+	if factory == nil {
+		t.Fatal("v1beta.GetSkillsProviderFactory() = nil — this package's init() did not self-register")
+	}
+
+	provider, err := factory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(provider.Catalog(), "declarative-skill") {
+		t.Errorf("Catalog() = %q, want it to list declarative-skill", provider.Catalog())
+	}
+	result, err := provider.Tool().Execute(context.Background(), map[string]interface{}{"name": "declarative-skill"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Content.(string), "declarative body") {
+		t.Errorf("Tool().Execute content = %v, want the real body", result.Content)
+	}
+}

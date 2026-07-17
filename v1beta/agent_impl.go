@@ -245,6 +245,32 @@ func newRealAgent(config *Config, handler HandlerFunc) (Agent, error) {
 			return nil, fmt.Errorf("failed to create tools: %w", err)
 		}
 		agent.tools = tools
+
+		// Skills (declarative, TOML-loadable): ToolsConfig.Skills.Dir names a
+		// directory, but the actual frontmatter-parsing/loading logic lives
+		// in a separate plugin (e.g. plugins/skills) to avoid v1beta
+		// depending on it — see SkillsProvider's doc comment (skills_
+		// provider.go) for why this is a registered-factory hook, not a
+		// direct call, same shape as ToolManagerFactory just above it in
+		// spirit. A Dir set with no factory registered is logged, not
+		// treated as an error: config alone can't distinguish a missing
+		// blank-import from a stale leftover value.
+		if config.Tools.Skills != nil && config.Tools.Skills.Dir != "" {
+			if factory := GetSkillsProviderFactory(); factory != nil {
+				provider, serr := factory(config.Tools.Skills.Dir)
+				if serr != nil {
+					Logger().Warn().Err(serr).Str("dir", config.Tools.Skills.Dir).Msg("failed to load skills provider")
+				} else if provider != nil {
+					agent.tools = append(agent.tools, provider.Tool())
+					if catalog := provider.Catalog(); catalog != "" {
+						config.SystemPrompt = config.SystemPrompt + "\n\n[Available skills — call load_skill(name) to fetch one's full body on demand]\n" + catalog
+					}
+				}
+			} else {
+				Logger().Warn().Str("dir", config.Tools.Skills.Dir).
+					Msg("ToolsConfig.Skills.Dir set but no skills provider registered — blank-import a skills plugin (e.g. plugins/skills) to enable it")
+			}
+		}
 	}
 
 	// Mark as initialized

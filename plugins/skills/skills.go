@@ -5,19 +5,28 @@
 // system prompt at boot, bodies fetched on demand via a load_skill tool call
 // — because no such primitive existed anywhere in the framework).
 //
-// Design intentionally deviates from this repo's usual plugin convention
-// (blank-import + init(), see plugins/logging/zerolog): a skill directory is
-// a runtime value the caller supplies (there's no fixed name to register at
-// import time, unlike a logging provider's static "zerolog" key), so this
-// package exposes an explicit Install(dir) instead. Call it once at startup;
-// it registers the tool via v1beta.RegisterInternalTool and hands back the
-// rendered catalog string to splice into the agent's SystemPrompt (e.g. via
-// core.FormatPromptString, the same GoTemplate path v1beta already runs
-// system prompts through on every call).
+// Two ways to wire this in, both end up registering the same load_skill Tool:
+//
+//  1. Declarative: blank-import this package (`_ "…/plugins/skills"`, its
+//     init() self-registers via v1beta.SetSkillsProviderFactory — same
+//     convention as plugins/logging/zerolog) and set
+//     Config.Tools.Skills.Dir (TOML-loadable: [tools.skills] dir = "..."),
+//     matching how MCP servers are configured. Builder.Build() then loads
+//     the catalog, appends the tool, and splices the rendered catalog into
+//     SystemPrompt itself — nothing else to call.
+//  2. Imperative: call Install(dir) directly at startup, before Build() —
+//     for callers who need the rendered catalog string themselves (e.g. to
+//     fold into a hand-built SystemPrompt via core.FormatPromptString,
+//     before ever constructing a Config).
+//
+// A skill directory is a runtime value either way — there's no fixed name
+// to register at import time the way a logging provider has a static
+// string key, which is why (1) still needs an explicit Dir/Install call
+// even though the registration itself is init()-based.
 //
 // Bodies are intentionally NOT pre-loaded into the catalog or the system
 // prompt — only frontmatter (name/trigger/description/tags) is read at
-// Install time. A skill's full body is read from disk fresh on every
+// load time. A skill's full body is read from disk fresh on every
 // load_skill call, keeping memory flat regardless of corpus size.
 package skills
 
@@ -219,6 +228,37 @@ func Install(dir string) (catalogRender string, err error) {
 		return &loadSkillTool{cat: cat}
 	})
 	return cat.Render(), nil
+}
+
+// catalogProvider adapts a Catalog into v1beta.SkillsProvider — the
+// declarative path (ToolsConfig.Skills.Dir, TOML-loadable) below, as
+// opposed to Install's direct/imperative path above. Both end up building
+// the same loadSkillTool; this one also hands back the rendered catalog so
+// Builder.Build() can splice it into SystemPrompt itself, since a TOML
+// config has no Go call site to receive that string the way Install's
+// caller does.
+type catalogProvider struct{ cat Catalog }
+
+func (p *catalogProvider) Tool() v1beta.Tool { return &loadSkillTool{cat: p.cat} }
+func (p *catalogProvider) Catalog() string   { return p.cat.Render() }
+
+// init registers this package as the skills provider for
+// ToolsConfig.Skills.Dir (v1beta/skills_provider.go's SetSkillsProviderFactory
+// hook) — same self-registration convention as this repo's other plugins
+// (e.g. plugins/logging/zerolog's init()). A blank import
+// (`_ "github.com/agenticgokit/agenticgokit/plugins/skills"`) plus setting
+// Config.Tools.Skills.Dir in TOML or Go is then enough; no Install() call
+// needed for this path. Install() itself still works unchanged for callers
+// who prefer the direct/imperative style (e.g. when the catalog string is
+// needed before Build() runs, to fold into a hand-built SystemPrompt).
+func init() {
+	v1beta.SetSkillsProviderFactory(func(dir string) (v1beta.SkillsProvider, error) {
+		cat, err := LoadCatalog(dir)
+		if err != nil {
+			return nil, err
+		}
+		return &catalogProvider{cat: cat}, nil
+	})
 }
 
 // --- minimal YAML frontmatter parser: enough for the SKILL.md dialect ---

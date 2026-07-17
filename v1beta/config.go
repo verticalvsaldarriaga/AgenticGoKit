@@ -129,6 +129,22 @@ type ToolsConfig struct {
 	Cache            *CacheConfig          `toml:"cache,omitempty"`
 	CircuitBreaker   *CircuitBreakerConfig `toml:"circuit_breaker,omitempty"`
 	Reasoning        *ReasoningConfig      `toml:"reasoning,omitempty"` // Agent reasoning/continuation settings
+	Skills           *SkillsConfig         `toml:"skills,omitempty"`
+}
+
+// SkillsConfig declares a directory of on-demand-loadable skill packages
+// (SKILL.md files, frontmatter-indexed) for the load_skill internal tool.
+// Data only, same shape as MCPConfig.Servers — the actual frontmatter
+// parsing/loading logic lives in a separate plugin (e.g. plugins/skills),
+// not here, to avoid v1beta depending on that plugin (which itself imports
+// v1beta for Tool/ToolResult). Setting Dir has no effect unless a skills
+// plugin has registered a factory via SetSkillsProviderFactory (see
+// skills_provider.go) — createTools() logs a warning, not an error, if
+// Dir is set with no provider registered (config alone can't tell whether
+// that's a missing blank-import or a stale config left over from removing
+// one).
+type SkillsConfig struct {
+	Dir string `toml:"dir"`
 }
 
 // ReasoningConfig controls whether the agent uses continuation loops for reasoning
